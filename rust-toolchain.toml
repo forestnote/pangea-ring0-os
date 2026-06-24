@@ -1,0 +1,13 @@
+# rust-toolchain.toml
+[toolchain]
+profile = "minimal"
+channel = "nightly"
+components = [
+    "rust-src",           # カスタムターゲット向けの core/alloc クレート再コンパイルに必須
+    "llvm-tools-preview", # bootimageの生成やバイナリ操作（objcopy等）に必要
+    "rustfmt",
+    "clippy"
+]
+targets = [
+    "x86_64-unknown-none", # x86_64のベアメタルターゲット
+]
