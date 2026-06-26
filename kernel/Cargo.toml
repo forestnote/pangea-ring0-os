@@ -1,0 +1,15 @@
+[package]
+name = "pangea-kernel"
+version = "0.0.1-2"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+spin = "0.9"
+limine = { workspace = true }
+font8x8 = { version = "0.3.1", default-features = false }
+x86_64 = "0.14.13"
+lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
+uart_16550 = "0.3.0"
+pic8259 = "0.10.1"
+pc-keyboard = "0.7.0"

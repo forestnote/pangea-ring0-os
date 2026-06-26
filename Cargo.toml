@@ -1,28 +1,17 @@
-# pangea-ring0-OS/Cargo.toml[cite: 1]
-[package] #[cite: 1]
-name = "pangea" #[cite: 1]
-version = "0.0.1" #[cite: 1]
-edition = "2021" #[cite: 1]
-license = "MIT OR Apache-2.0" #[cite: 1]
+# pangea-ring0-os/Cargo.toml
+[workspace]
+members = [
+    "kernel"
+]
+resolver = "2"
 
-[dependencies] #[cite: 1]
-# Lightweight crate for handling Limine boot protocol structures (optional but recommended)[cite: 1]
-limine = { version = "0.3", optional = true } #[cite: 1]
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
 
-# Bare-metal utility primitives[cite: 1]
-spin = "0.9" # Provides spinlock synchronization mechanisms[cite: 1]
-
-[build-dependencies] #[cite: 1]
-# Tooling for generating the Limine bootstrap[cite: 1]
-limine-binutils = "0.1" #[cite: 1]
-
-[profile.release] #[cite: 1]
-opt-level = "z"       # Optimize for size (reduces memory footprint)[cite: 1]
-lto = true            # Link-Time Optimization[cite: 1]
-codegen-units = 1     # Maximize LTO efficiency via a single compilation unit[cite: 1]
-panic = "abort"       # Immediate abort on error without backtrace unwinding[cite: 1]
-strip = true          # Strip symbols (for both security obfuscation and size reduction)[cite: 1]
-
-[[bin]] #[cite: 1]
-name = "pangea" #[cite: 1]
-test = false #[cite: 1]
+# (追加) Limineのブート可能イメージを生成するためのツール
+[workspace.dependencies]
+limine = "0.6.5"
