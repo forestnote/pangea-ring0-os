@@ -1,0 +1,21 @@
+Initializing PangeaOS Ring-0 Development Environment...
+QEMU: QEMU emulator version 11.0.1
+GDB:  GNU gdb (GDB) 17.1
+Rust: rustc 1.98.0-nightly (f28ac764c 2026-06-23)
+[+] Compiling PangeaOS Kernel...
+[+] Crafting Bootable ISO Image...
+[+] Injecting Limine MBR Bootloader...
+=====================================
+PangeaOS Ring 0: The Singularity Engine
+=====================================
+[ OK ] Ring 0 Exclusive GDT & TSS Loaded. IST Active.
+[ OK ] True IDT Loaded. Exception Barrier Active.
+[ OK ] 8259 PIC Disabled (All Masked).
+[ INFO ] APIC Physical Base: 0xFEE00000
+[ INFO ] APIC Virtual Base: 0xFFFF8000FEE00000
+[ OK ] Local APIC Initialized. Timer Active.
+[ SUCCESS ] Allocator verified.
+[ DEBUG ] Keyboard task. Ticks: 11, Interrupts Enabled: true
+[ TIMER ] Async Task Awake: 1 cycles
+[ DEBUG ] Keyboard task. Ticks: 17, Interrupts Enabled: true
+[ TIMER ] Async Task Awake: 2 cycles

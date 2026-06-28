@@ -11,6 +11,8 @@ mod pmm;
 mod memory;
 mod allocator;
 pub mod serial;
+pub mod task;
+pub mod apic;
 
 use core::panic::PanicInfo;
 use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest};
@@ -74,7 +76,7 @@ pub extern "C" fn _start() -> ! {
 
             gdt::init();
             interrupts::init_idt();
-            println!("[ OK ] Zero-Interrupt Polling Engine Online.");
+            println!("[ OK ] GDT and IDT Loaded.");
 
             if let (Some(mem_map_res), Some(hhdm_res)) = (MEMMAP_REQUEST.response(), HHDM_REQUEST.response()) {
                 let mem_map = mem_map_res.entries();
@@ -96,11 +98,22 @@ pub extern "C" fn _start() -> ! {
                 let mut allocator_guard = pmm::PMM.lock();
                 let pmm_allocator = allocator_guard.as_mut().unwrap();
 
+                // ==========================================
+                // ★ Phase 3-3: Local APIC Initialization
+                // ==========================================
+                println!("\n[ INFO ] Engaging Local APIC (Modern Interrupts)...");
+                interrupts::disable_pic();
+                apic::init(hhdm_offset, &mut mapper, pmm_allocator);
+                println!("[ OK ] Hybrid Async-Interrupt Engine Online (APIC Driven).");
+
                 allocator::init_heap(&mut mapper, pmm_allocator).expect("Heap initialization failed!");
 
                 drop(allocator_guard);
 
                 println!("[ OK ] Heap Space Mapped. Engaging Rust 'alloc' Ecosystem...");
+
+                // Enable interrupts ONLY AFTER the allocator is ready
+                unsafe { x86_64::instructions::interrupts::enable() };
 
                 // 動的メモリ確保の実証実験 (Box, Vec, String)
                 let heap_value = Box::new(0x1337_C0DE_DEAD_BEEF_u64);
@@ -121,40 +134,26 @@ pub extern "C" fn _start() -> ! {
             }
 
             println!("\n[ TARGET ACQUIRED ]");
-            println!("System is locked into a pure polling state.");
+            println!("System is locked into an Async-Await Task Executor.");
             println!("Click this QEMU window and press [PageUp] or [ArrowUp].");
 
-            use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1, KeyCode};
-            let mut keyboard = Keyboard::new(ScancodeSet1::new(), layouts::Us104Key, HandleControl::Ignore);
-
-            loop {
-                unsafe {
-                    let mut port_64 = x86_64::instructions::port::Port::<u8>::new(0x64);
-                    let mut port_60 = x86_64::instructions::port::Port::<u8>::new(0x60);
-
-                    while (port_64.read() & 1) == 1 {
-                        let scancode = port_60.read();
-
-                        if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
-                            if let Some(key) = keyboard.process_keyevent(key_event) {
-                                match key {
-                                    DecodedKey::RawKey(raw) => {
-                                        match raw {
-                                            KeyCode::PageUp | KeyCode::ArrowUp => crate::writer::scroll_up(),
-                                            KeyCode::PageDown | KeyCode::ArrowDown => crate::writer::scroll_down(),
-                                            _ => {}
-                                        }
-                                    }
-                                    DecodedKey::Unicode(character) => {
-                                        crate::print!("{}", character);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    core::arch::asm!("pause");
+            let mut executor = task::executor::Executor::new();
+            
+            // Spawn Keyboard Async Poller
+            executor.spawn(task::Task::new(task::keyboard::keyboard_task()));
+            
+            // Spawn Timer Task
+            executor.spawn(task::Task::new(async {
+                let mut counter = 0;
+                loop {
+                    task::timer::sleep(5).await; // wait for 5 ticks
+                    counter += 1;
+                    crate::println!("[ TIMER ] Async Task Awake: {} cycles", counter);
+                    crate::serial_println!("[ TIMER ] Async Task Awake: {} cycles", counter);
                 }
-            }
+            }));
+
+            executor.run();
         }
     }
 

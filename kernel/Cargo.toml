@@ -13,3 +13,4 @@ lazy_static = { version = "1.5.0", features = ["spin_no_std"] }
 uart_16550 = "0.3.0"
 pic8259 = "0.10.1"
 pc-keyboard = "0.7.0"
+crossbeam-queue = { version = "0.3.8", default-features = false, features = ["alloc"] }

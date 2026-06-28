@@ -45,12 +45,15 @@ pub struct Selectors {
 
 pub fn init() {
     use x86_64::instructions::tables::load_tss;
-    use x86_64::instructions::segmentation::{CS, Segment};
+    use x86_64::instructions::segmentation::{CS, SS, Segment};
+    use x86_64::structures::gdt::SegmentSelector;
 
     GDT.0.load();
     unsafe {
         // 現在のコードセグメントレジスタ(CS)をRing 0用に書き換え
         CS::set_reg(GDT.1.code_selector);
+        // SS (Stack Segment) レジスタに残っている古い(Limineの)セレクタを無効化 (64-bitでは0で正常)
+        SS::set_reg(SegmentSelector::new(0, x86_64::PrivilegeLevel::Ring0));
         // CPUにTSSの場所を教え、ISTを有効化する
         load_tss(GDT.1.tss_selector);
     }

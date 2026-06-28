@@ -1,6 +1,28 @@
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use lazy_static::lazy_static;
 use crate::{serial_println, println, gdt};
+use pic8259::ChainedPics;
+use spin::Mutex;
+
+pub const PIC_1_OFFSET: u8 = 32;
+pub const PIC_2_OFFSET: u8 = PIC_1_OFFSET + 8;
+
+pub static PICS: Mutex<ChainedPics> = Mutex::new(unsafe { ChainedPics::new(PIC_1_OFFSET, PIC_2_OFFSET) });
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+pub enum InterruptIndex {
+    Timer = PIC_1_OFFSET,
+}
+
+impl InterruptIndex {
+    fn as_u8(self) -> u8 {
+        self as u8
+    }
+    fn as_usize(self) -> usize {
+        usize::from(self.as_u8())
+    }
+}
 
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
@@ -17,6 +39,8 @@ lazy_static! {
             .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
 
+        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
+
         idt
     };
 }
@@ -24,6 +48,22 @@ lazy_static! {
 pub fn init_idt() {
     IDT.load();
     serial_println!("[ OK ] True IDT Loaded. Exception Barrier Active.");
+}
+
+pub fn disable_pic() {
+    unsafe { PICS.lock().initialize() };
+    
+    // Mask all interrupts (0xFF) to disable 8259 PIC entirely
+    let mut pics = PICS.lock();
+    unsafe {
+        pics.write_masks(0xFF, 0xFF);
+    }
+    serial_println!("[ OK ] 8259 PIC Disabled (All Masked).");
+}
+
+extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    crate::task::timer::tick();
+    crate::apic::eoi();
 }
 
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
