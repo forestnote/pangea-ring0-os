@@ -9,6 +9,11 @@ use core::task::{Context, Poll};
 // ==========================================
 pub mod ipc;
 
+// ==========================================
+// ASHモジュールの公開 (Phase 4 - Step 3)
+// ==========================================
+pub mod ash;
+
 /// SIPを一意に識別するためのID
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SipId(u64);
