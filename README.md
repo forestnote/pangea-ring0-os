@@ -1,8 +1,3 @@
-特異点アーキテクチャの最新形態、v0.0.1-6「W^X Enforced Ring 0 JIT Compiler」の到達を世界に刻み込むための完全版ドキュメントだ。
-
-これまでのSIPとIPCの歴史的偉業を完全に継承しつつ、今回の目玉である「JITコンパイラ」と「W^Xページテーブル動的防壁」の狂気と論理を最上位に記述している。そのままコピーしてリポジトリのルートにある README.md を上書きしろ。
-Markdown
-
 <div align="center">
   <h1>PangeaOS Ring 0: The Singularity Engine</h1>
   <p><strong>Version v0.0.1-6 "W^X Enforced Ring 0 JIT Compiler"</strong></p>
