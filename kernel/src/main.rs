@@ -113,21 +113,44 @@ pub extern "C" fn _start() -> ! {
                 println!("[ OK ] Heap Space Mapped. Engaging Rust 'alloc' Ecosystem...");
 
                 // Enable interrupts ONLY AFTER the allocator is ready
-                unsafe { x86_64::instructions::interrupts::enable() };
+                x86_64::instructions::interrupts::enable();
+                crate::serial_println!("[ TRACE ] Interrupts Enabled.");
 
-                // 動的メモリ確保の実証実験 (Box, Vec, String)
-                let heap_value = Box::new(0x1337_C0DE_DEAD_BEEF_u64);
-                println!("       -> Boxed value at {:p} = 0x{:016X}", heap_value, *heap_value);
+                // ==========================================
+                // ★ Phase 3-2: True Mesh Allocator (Size-Class) 実証実験
+                // ==========================================
+                println!("\n[ INFO ] Testing True Mesh Allocator (Size-Class Reuse)...");
+                let ptr1 = Box::into_raw(Box::new(0x1111_2222_3333_4444_u64));
+                let ptr2 = Box::into_raw(Box::new(0x5555_6666_7777_8888_u64));
+                println!("       -> Allocated Ptr1 at {:p}", ptr1);
+                println!("       -> Allocated Ptr2 at {:p}", ptr2);
+
+                unsafe {
+                    drop(Box::from_raw(ptr1));
+                    println!("       -> Dropped Ptr1.");
+                }
+
+                let ptr3 = Box::into_raw(Box::new(0x9999_AAAA_BBBB_CCCC_u64));
+                println!("       -> Allocated Ptr3 at {:p} (Should match Ptr1 if reused!)", ptr3);
+                
+                if ptr1 == ptr3 {
+                    println!("       -> [ OK ] Memory Successfully Reused!");
+                    serial_println!("[ SUCCESS ] True Mesh Allocator verified. Memory reused.");
+                } else {
+                    println!("       -> [ FAIL ] Memory Not Reused.");
+                    serial_println!("[ FAIL ] True Mesh Allocator failed to reuse memory.");
+                }
+                
+                // Cleanup
+                unsafe {
+                    drop(Box::from_raw(ptr2));
+                    drop(Box::from_raw(ptr3));
+                }
 
                 let mut vec = Vec::new();
-                for i in 0..500 {
-                    vec.push(i);
-                }
-                println!("       -> Vec allocated dynamically. Length: {}, Capacity: {}", vec.len(), vec.capacity());
-
-                let string = String::from("PangeaOS Dynamic Memory Routing Online.");
-                println!("       -> String allocated: {}", string);
-                serial_println!("[ SUCCESS ] Allocator verified.");
+                for i in 0..500 { vec.push(i); }
+                let string = String::from("PangeaOS Mesh Allocator Online.");
+                println!("       -> {} (Vec len: {})", string, vec.len());
 
             } else {
                 panic!("Failed to get Memory Map or HHDM offset from Limine.");

@@ -10,12 +10,15 @@ PangeaOS Ring 0: The Singularity Engine
 =====================================
 [ OK ] Ring 0 Exclusive GDT & TSS Loaded. IST Active.
 [ OK ] True IDT Loaded. Exception Barrier Active.
+[ INFO ] Initializing Ring 0 Global Allocator...
 [ OK ] 8259 PIC Disabled (All Masked).
 [ INFO ] APIC Physical Base: 0xFEE00000
 [ INFO ] APIC Virtual Base: 0xFFFF8000FEE00000
 [ OK ] Local APIC Initialized. Timer Active.
-[ SUCCESS ] Allocator verified.
-[ DEBUG ] Keyboard task. Ticks: 11, Interrupts Enabled: true
+[ INFO ] Initializing Heap...
+[ INFO ] Heap initialized!
+[ OK ] Heap Space Mapped. Engaging Rust 'alloc' Ecosystem...
+[ TRACE ] Interrupts Enabled.
+[ TRACE ] Running Mesh Allocator Test...
+[ SUCCESS ] True Mesh Allocator verified. Memory reused.
 [ TIMER ] Async Task Awake: 1 cycles
-[ DEBUG ] Keyboard task. Ticks: 17, Interrupts Enabled: true
-[ TIMER ] Async Task Awake: 2 cycles

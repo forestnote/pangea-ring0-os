@@ -7,6 +7,8 @@ use spin::Mutex;
 pub const HEAP_START: usize = 0x_4444_4444_0000;
 pub const HEAP_SIZE: usize = 100 * 1024; // 初期状態: 100KB
 
+pub mod mesh;
+
 pub struct Locked<A> {
     inner: Mutex<A>,
 }
@@ -21,61 +23,20 @@ impl<A> Locked<A> {
     }
 }
 
-pub struct MeshReadyAllocator {
-    heap_start: usize,
-    heap_end: usize,
-    next: usize,
-    allocations: usize,
-}
-
-impl MeshReadyAllocator {
-    pub const fn new() -> Self {
-        MeshReadyAllocator {
-            heap_start: 0,
-            heap_end: 0,
-            next: 0,
-            allocations: 0,
-        }
-    }
-
-    pub fn init(&mut self, heap_start: usize, heap_size: usize) {
-        self.heap_start = heap_start;
-        self.heap_end = heap_start + heap_size;
-        self.next = heap_start;
-    }
-}
-
-unsafe impl GlobalAlloc for Locked<MeshReadyAllocator> {
+unsafe impl GlobalAlloc for Locked<mesh::MeshAllocator> {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let mut allocator = self.lock();
-
-        let alloc_start = align_up(allocator.next, layout.align());
-        let alloc_end = alloc_start.saturating_add(layout.size());
-
-        if alloc_end <= allocator.heap_end {
-            allocator.next = alloc_end;
-            allocator.allocations += 1;
-            alloc_start as *mut u8
-        } else {
-            null_mut()
-        }
+        allocator.alloc(layout)
     }
 
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         let mut allocator = self.lock();
-        allocator.allocations -= 1;
-        if allocator.allocations == 0 {
-            allocator.next = allocator.heap_start;
-        }
+        allocator.dealloc(ptr, layout);
     }
-}
-
-fn align_up(addr: usize, align: usize) -> usize {
-    (addr + align - 1) & !(align - 1)
 }
 
 #[global_allocator]
-pub static ALLOCATOR: Locked<MeshReadyAllocator> = Locked::new(MeshReadyAllocator::new());
+pub static ALLOCATOR: Locked<mesh::MeshAllocator> = Locked::new(mesh::MeshAllocator::new());
 
 pub fn init_heap(
     mapper: &mut impl Mapper<Size4KiB>,

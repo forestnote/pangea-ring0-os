@@ -17,7 +17,7 @@ pub fn init(
     mapper: &mut impl Mapper<Size4KiB>,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
 ) {
-    let mut msr = Msr::new(0x1B); // IA32_APIC_BASE
+    let msr = Msr::new(0x1B); // IA32_APIC_BASE
     let phys_base = unsafe { msr.read() } & 0xFFFF_FFFF_FFFF_F000;
     let virt_base = phys_base + hhdm_offset;
     
