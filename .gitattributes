@@ -1,6 +1,11 @@
+# ==========================================
 # GitHub Linguist Absolute Override
-*.c linguist-vendored
-*.h linguist-vendored
-*.asm linguist-vendored
-*.s linguist-vendored
-limine/** linguist-vendored
+# ==========================================
+# C/C++関連ファイルを「外部ライブラリ」「自動生成」「検知不能」としてマークし、統計から完全に抹消する
+*.c linguist-vendored=true linguist-generated=true linguist-detectable=false
+*.h linguist-vendored=true linguist-generated=true linguist-detectable=false
+*.asm linguist-vendored=true linguist-generated=true linguist-detectable=false
+*.s linguist-vendored=true linguist-generated=true linguist-detectable=false
+
+# Limineディレクトリ丸ごとパージ
+limine/** linguist-vendored=true linguist-generated=true linguist-detectable=false
