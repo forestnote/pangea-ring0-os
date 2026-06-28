@@ -1,7 +1,6 @@
 use x86_64::VirtAddr;
 use x86_64::structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB};
 use core::alloc::{GlobalAlloc, Layout};
-use core::ptr::null_mut;
 use spin::Mutex;
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;

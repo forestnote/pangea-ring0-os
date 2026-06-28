@@ -72,7 +72,7 @@ pub extern "C" fn _start() -> ! {
             }
 
             writer::init_writer(fb_ptr, width, height, pitch);
-            println!("PangeaOS v0.0.1-2: Memory Defense Engaged.");
+            println!("PangeaOS v0.0.1-3: Async Singularity Awakened.");
 
             gdt::init();
             interrupts::init_idt();
