@@ -1,0 +1,6 @@
+# GitHub Linguist Absolute Override
+*.c linguist-vendored
+*.h linguist-vendored
+*.asm linguist-vendored
+*.s linguist-vendored
+limine/** linguist-vendored
