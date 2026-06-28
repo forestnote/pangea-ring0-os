@@ -13,9 +13,10 @@ mod allocator;
 pub mod serial;
 pub mod task;
 pub mod apic;
+pub mod smp;
 
 use core::panic::PanicInfo;
-use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest};
+use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest, MpRequest};
 use limine::BaseRevision;
 use x86_64::VirtAddr;
 
@@ -38,6 +39,10 @@ static MEMMAP_REQUEST: MemmapRequest = MemmapRequest::new();
 #[used]
 #[link_section = ".requests"]
 static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+
+#[used]
+#[link_section = ".requests"]
+static MP_REQUEST: MpRequest = MpRequest::new(0);
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -72,7 +77,7 @@ pub extern "C" fn _start() -> ! {
             }
 
             writer::init_writer(fb_ptr, width, height, pitch);
-            println!("PangeaOS v0.0.1-3: Async Singularity Awakened.");
+            println!("PangeaOS v0.0.1-4: Async Singularity Awakened.");
 
             gdt::init();
             interrupts::init_idt();
@@ -105,6 +110,27 @@ pub extern "C" fn _start() -> ! {
                 interrupts::disable_pic();
                 apic::init(hhdm_offset, &mut mapper, pmm_allocator);
                 println!("[ OK ] Hybrid Async-Interrupt Engine Online (APIC Driven).");
+
+                // ==========================================
+                // ★ Phase 4: SMP Initialization
+                // ==========================================
+                println!("\n[ INFO ] Initializing Symmetric Multiprocessing (SMP)...");
+                if let Some(mp_response) = MP_REQUEST.response() {
+                    let cpus = mp_response.cpus();
+                    let bsp_lapic_id = mp_response.bsp_lapic_id;
+                    println!("       -> Detected {} CPU Cores.", cpus.len());
+                    serial_println!("[ INFO ] Detected {} CPU Cores.", cpus.len());
+
+                    for cpu in cpus {
+                        if cpu.lapic_id != bsp_lapic_id {
+                            cpu.bootstrap(smp::ap_main, 0);
+                        } else {
+                            println!("       -> BSP (Core {}) is active.", cpu.lapic_id);
+                        }
+                    }
+                } else {
+                    println!("       -> [ WARN ] MP Request failed or not supported.");
+                }
 
                 allocator::init_heap(&mut mapper, pmm_allocator).expect("Heap initialization failed!");
 
