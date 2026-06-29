@@ -21,6 +21,9 @@ pub mod task;
 // --- 新規追加したSIP（ソフトウェア分離プロセス）モジュール ---
 pub mod sip;
 
+// --- ハードウェア分離・保護モジュール ---
+pub mod cpu;
+
 use core::panic::PanicInfo;
 use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest};
 use limine::BaseRevision;
@@ -190,6 +193,10 @@ pub extern "C" fn _start() -> ! {
 
             gdt::init();
             interrupts::init_idt();
+
+            // ★ Phase 5: ハードウェア支援の隔離・保護（SMEP/SMAP/PKU）を有効化
+            cpu::init_features();
+            println!("[+] Hardware Protection (SMEP/SMAP/PKU) Enabled.");
             println!("[ OK ] Ring 0 Exclusive GDT & True IDT Loaded.");
 
             interrupts::disable_pic();

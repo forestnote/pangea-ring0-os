@@ -25,7 +25,7 @@ iso: build
 
 run: iso
 	@echo "[+] Booting PangeaOS in QEMU..."
-	@qemu-system-x86_64 -m 2G -cdrom $(ISO_NAME) -serial stdio
+	@qemu-system-x86_64 -cpu max -m 2G -cdrom $(ISO_NAME) -serial stdio
 
 clean:
 	@echo "[+] Purging build artifacts..."
