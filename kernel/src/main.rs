@@ -16,6 +16,7 @@ pub mod scheduler;
 
 // --- 復元したハードウェア制御モジュール ---
 pub mod apic;
+pub mod ioapic;
 pub mod task;
 
 // --- 新規追加したSIP（ソフトウェア分離プロセス）モジュール ---
@@ -203,8 +204,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.5-9 に更新
-            println!("PangeaOS v0.0.5-9: Ultra-high-speed Network Stack & Ring 0 Web Server.");
+            // ★ バージョンとブートシグネチャを v0.0.6-1 に更新
+            println!("PangeaOS v0.0.6-1: Ultimate Hardware IOAPIC Mastery.");
 
             gdt::init();
             interrupts::init_idt();
@@ -243,6 +244,10 @@ pub extern "C" fn _start() -> ! {
 
                 // Initialize APIC for BSP
                 apic::init(hhdm_offset, &mut mapper, pmm_allocator);
+                ioapic::init(hhdm_offset, &mut mapper, pmm_allocator);
+                
+                // Route IRQ 11 (E1000) to BSP (APIC ID 0), Vector 43
+                ioapic::set_irq(11, 0, interrupts::InterruptIndex::Network.as_u8());
 
                 drop(allocator_guard);
 
@@ -463,7 +468,6 @@ pub extern "C" fn _start() -> ! {
             serial_println!("[ SYSTEM ] PangeaOS SMP Kernel Initialized. BSP entering idle loop.");
 
             loop { 
-                crate::net::poll();
                 unsafe { core::arch::asm!("hlt") }; 
             }
         }
@@ -493,7 +497,6 @@ pub extern "C" fn beta_thread_entry() {
 
 pub extern "C" fn idle_thread_entry() {
     loop { 
-        crate::net::poll();
         unsafe { core::arch::asm!("hlt") } 
     }
 }

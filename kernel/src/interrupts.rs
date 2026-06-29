@@ -18,7 +18,7 @@ pub enum InterruptIndex {
 }
 
 impl InterruptIndex {
-    fn as_u8(self) -> u8 {
+    pub fn as_u8(self) -> u8 {
         self as u8
     }
     fn as_usize(self) -> usize {
@@ -139,9 +139,7 @@ pub extern "x86-interrupt" fn network_interrupt_handler(_stack_frame: InterruptS
     crate::net::ack_interrupt();
     crate::net::poll();
     
-    unsafe {
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Network.as_u8());
-    }
+    crate::apic::eoi();
 }
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     println!("\n[ WARNING ] EXCEPTION: BREAKPOINT");
