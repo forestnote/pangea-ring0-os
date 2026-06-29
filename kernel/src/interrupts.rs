@@ -137,6 +137,7 @@ pub extern "x86-interrupt" fn network_interrupt_handler(_stack_frame: InterruptS
     crate::serial_println!("[ NET ] Asynchronous Network Interrupt (Packet Event) Received!");
     
     crate::net::ack_interrupt();
+    crate::net::poll();
     
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Network.as_u8());
