@@ -1,6 +1,6 @@
 <div align="center">
 <h1>PangeaOS Ring 0: The Singularity Engine</h1>
-  <p><strong>Version v0.0.2-1 "Hardware-Assisted Isolation (SMEP/SMAP/PKU)"</strong></p>
+  <p><strong>Version v0.0.2-2 "CHERI Capability Architecture Integration"</strong></p>
   <p>
     Rust言語の持つ「強力な型システム」「所有権構造」「ゼロコスト抽象化」を極限まで活かし、ハードウェアの直上（リング0）で動作する次世代のベアメタル・オペレーティングシステムを構築する研究開発プロジェクト。
   </p>
@@ -143,7 +143,7 @@ PageDown / ArrowDown : ターミナル履歴バッファを下にスクロール
 - [x] **v0.0.2-1: SMEP / SMAP / PKU (MPK) の統合**
   - **SMEP / SMAP 有効化**: カーネル（Ring 0）から意図せずユーザーレベル（または無効なデータ）ページを実行・アクセスするのを物理的に防ぐハードウェア保護の有効化。
   - **MPK (Memory Protection Keys) 導入**: ページテーブル (CR3) の切り替えオーバーヘッドをゼロにしつつ、メモリ領域ごとのアクセス権 (R/W/X) を `WRPKRU` レジスタ一発で瞬時にフリップする次世代アイソレーション機構の構築。
-- [ ] **v0.0.2-2: CHERI (制限境界付きポインタ) アーキテクチャの概念統合**
+- [x] **v0.0.2-2: CHERI (制限境界付きポインタ) アーキテクチャの概念統合**
   - 現在ソフトウェアベースで行っている JIT MBC (ブランチレス境界チェック) をハードウェアにオフロード。ポインタ自体に「アクセス権限」と「境界長」を持たせ、Rustの `unsafe` ブロック内であっても領域外アクセスをハードウェアレベルで完全に阻止するコンパートメント化の実現。
 - [ ] **v0.0.2-3: µFork (マイクロフォーク) プロセスメカニズムの確立**
   - 巨大なUnixの `fork()` を捨て去り、必要なメモリ領域のみを Copy-on-Write (CoW) で瞬時にクローンする、極めて軽量かつセキュアなプロセス生成基盤の構築。

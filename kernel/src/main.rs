@@ -188,8 +188,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.2-1 に更新
-            println!("PangeaOS v0.0.2-1: Hardware-Assisted Isolation (SMEP/SMAP/PKU).");
+            // ★ バージョンとブートシグネチャを v0.0.2-2 に更新
+            println!("PangeaOS v0.0.2-2: CHERI Capability Architecture Integration.");
 
             gdt::init();
             interrupts::init_idt();
