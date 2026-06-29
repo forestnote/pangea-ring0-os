@@ -7,6 +7,8 @@ const APIC_TIMER_INIT: u64 = 0x380;
 // const APIC_TIMER_CURR: u64 = 0x390;
 const APIC_TIMER_DIV: u64 = 0x3E0;
 const APIC_ID: u64 = 0x20;
+const APIC_ICR_LOW: u64 = 0x300;
+const APIC_ICR_HIGH: u64 = 0x310;
 
 use x86_64::structures::paging::{Page, PhysFrame, Mapper, Size4KiB, PageTableFlags, FrameAllocator};
 use x86_64::{VirtAddr, PhysAddr};
@@ -106,4 +108,10 @@ pub fn read_reg(offset: u64) -> u32 {
 
 pub fn lapic_id() -> u8 {
     (read_reg(APIC_ID) >> 24) as u8
+}
+
+pub fn send_ipi(vector: u8, dest_shorthand: u8) {
+    // dest_shorthand: 0=No shorthand, 1=Self, 2=All including self, 3=All excluding self
+    let icr_val = (vector as u32) | ((dest_shorthand as u32) << 18);
+    write_reg(APIC_ICR_LOW, icr_val);
 }

@@ -398,7 +398,9 @@ pub extern "C" fn _start() -> ! {
             *BETA_RX.lock() = Some(rx);
 
             if let Some(smp_response) = SMP_REQUEST.response() {
-                for ap in smp_response.cpus() {
+                let cpus = smp_response.cpus();
+                crate::smp::ACTIVE_CORES.store(cpus.len(), core::sync::atomic::Ordering::Release);
+                for ap in cpus {
                     if ap.lapic_id != apic::lapic_id() as u32 {
                         serial_println!("[ SYSTEM ] Sending wake up signal to AP {}", ap.lapic_id);
                         ap.bootstrap(crate::smp::ap_main, 0);

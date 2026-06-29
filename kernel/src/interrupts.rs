@@ -13,6 +13,7 @@ pub static PICS: Mutex<ChainedPics> = Mutex::new(unsafe { ChainedPics::new(PIC_1
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
+    TlbShootdown = 0x40,
 }
 
 impl InterruptIndex {
@@ -42,6 +43,8 @@ lazy_static! {
         unsafe {
             idt[InterruptIndex::Timer.as_usize()]
                 .set_handler_addr(x86_64::VirtAddr::new(timer_interrupt_handler_naked as *const () as u64));
+            idt[InterruptIndex::TlbShootdown.as_usize()]
+                .set_handler_fn(tlb_shootdown_handler);
         }
 
         idt
@@ -147,4 +150,13 @@ extern "x86-interrupt" fn double_fault_handler(stack_frame: InterruptStackFrame,
     println!("\n[ KERNEL PANIC ] DOUBLE FAULT (IST STACK ENGAGED)");
     serial_println!("\n[ KERNEL PANIC ] DOUBLE FAULT (IST STACK ENGAGED)\n{:#?}", stack_frame);
     loop { unsafe { core::arch::asm!("hlt") } }
+}
+
+extern "x86-interrupt" fn tlb_shootdown_handler(_stack_frame: InterruptStackFrame) {
+    let addr = crate::smp::SHOOTDOWN_ADDR.load(core::sync::atomic::Ordering::Acquire);
+    if addr != 0 {
+        unsafe { x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr)) };
+    }
+    crate::smp::SHOOTDOWN_ACK.fetch_add(1, core::sync::atomic::Ordering::Release);
+    crate::apic::eoi();
 }

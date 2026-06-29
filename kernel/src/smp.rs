@@ -28,3 +28,32 @@ pub unsafe extern "C" fn ap_main(info: &MpInfo) -> ! {
         unsafe { core::arch::asm!("hlt") }
     }
 }
+
+use core::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+pub static SHOOTDOWN_ADDR: AtomicU64 = AtomicU64::new(0);
+pub static SHOOTDOWN_ACK: AtomicUsize = AtomicUsize::new(0);
+pub static ACTIVE_CORES: AtomicUsize = AtomicUsize::new(1); // Updated during boot
+
+pub fn tlb_shootdown(addr: u64) {
+    let cores = ACTIVE_CORES.load(Ordering::Acquire);
+    if cores <= 1 {
+        // シングルコア環境の場合は自コアのTLBフラッシュのみで完了
+        unsafe { x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr)) };
+        return;
+    }
+
+    SHOOTDOWN_ADDR.store(addr, Ordering::Release);
+    SHOOTDOWN_ACK.store(0, Ordering::Release);
+    
+    // 他の全コア(自コアを除く)に対してTLB Shootdown割り込み(0x40)を送信
+    crate::apic::send_ipi(0x40, 3);
+
+    // 他の全コアからの応答(ACK)をスピンして待機 (厳密な同期)
+    while SHOOTDOWN_ACK.load(Ordering::Acquire) < cores - 1 {
+        core::hint::spin_loop();
+    }
+    
+    // 自コアのTLBも最後にフラッシュ
+    unsafe { x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr)) };
+}

@@ -579,8 +579,9 @@ impl AshJit {
         // PRESENT ビットのみを立てる（WRITABLE と NO_EXECUTE を物理的に剥奪する）
         let flags = PageTableFlags::PRESENT;
         unsafe {
-            let flush = mapper.update_flags(page, flags).expect("Failed to seal JIT page");
-            flush.flush(); // TLBをフラッシュし、CPUに新たなセキュリティ境界を強制認識させる
+            let _flush = mapper.update_flags(page, flags).expect("Failed to seal JIT page");
+            // TLBをフラッシュし、他のコアのTLBも確実にフラッシュする(Cross-Core TLB Shootdown)
+            crate::smp::tlb_shootdown(self.buffer as u64);
         }
     }
 
@@ -602,8 +603,8 @@ impl Drop for AshJit {
             let page = Page::<Size4KiB>::containing_address(VirtAddr::new(self.buffer as u64));
             let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;
             unsafe {
-                if let Ok(flush) = mapper.update_flags(page, flags) {
-                    flush.flush(); // TLBフラッシュ
+                if let Ok(_flush) = mapper.update_flags(page, flags) {
+                    crate::smp::tlb_shootdown(self.buffer as u64); // Cross-Core TLB Shootdown
                 }
             }
         }
