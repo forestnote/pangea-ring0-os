@@ -193,8 +193,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.2-4 に更新
-            println!("PangeaOS v0.0.2-4: Ring 0 POSIX Syscall Emulation.");
+            // ★ バージョンとブートシグネチャを v0.0.2-5 に更新
+            println!("PangeaOS v0.0.2-5: PKS Domain Isolation.");
 
             gdt::init();
             interrupts::init_idt();
