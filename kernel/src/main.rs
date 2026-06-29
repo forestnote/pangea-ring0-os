@@ -462,7 +462,10 @@ pub extern "C" fn _start() -> ! {
             println!("[ SYSTEM ] PangeaOS SMP Kernel Initialized. BSP entering idle loop.");
             serial_println!("[ SYSTEM ] PangeaOS SMP Kernel Initialized. BSP entering idle loop.");
 
-            loop { unsafe { core::arch::asm!("hlt") }; }
+            loop { 
+                crate::net::poll();
+                unsafe { core::arch::asm!("hlt") }; 
+            }
         }
     }
 
@@ -489,5 +492,8 @@ pub extern "C" fn beta_thread_entry() {
 }
 
 pub extern "C" fn idle_thread_entry() {
-    loop { unsafe { core::arch::asm!("hlt") } }
+    loop { 
+        crate::net::poll();
+        unsafe { core::arch::asm!("hlt") } 
+    }
 }
