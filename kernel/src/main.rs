@@ -24,6 +24,9 @@ pub mod sip;
 // --- ハードウェア分離・保護モジュール ---
 pub mod cpu;
 
+// --- POSIX システムコール互換レイヤー ---
+pub mod syscall;
+
 use core::panic::PanicInfo;
 use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest};
 use limine::BaseRevision;
@@ -198,6 +201,11 @@ pub extern "C" fn _start() -> ! {
             // ★ Phase 5: ハードウェア支援の隔離・保護（SMEP/SMAP/PKU）を有効化
             cpu::init_features();
             println!("[+] Hardware Protection (SMEP/SMAP/PKU) Enabled.");
+            
+            // ★ Phase 5: POSIXシステムコール・エミュレーション初期化
+            syscall::init();
+            println!("[+] Ring 0 POSIX Syscall Emulation Layer Active.");
+            
             println!("[ OK ] Ring 0 Exclusive GDT & True IDT Loaded.");
 
             interrupts::disable_pic();
@@ -327,6 +335,35 @@ pub extern "C" fn _start() -> ! {
             serial_println!("        -> [ Child SIP ] Loop Calculation Sum (State[1]): {}", child_process.state()[1]);
             println!("        -> [ Child SIP ] JIT Execution Time (TSC Ticks): {}", child_process.state()[2]);
             serial_println!("        -> [ Child SIP ] JIT Execution Time (TSC Ticks): {}", child_process.state()[2]);
+
+            // ==========================================
+            // ★ Phase 5: POSIX エミュレーション (Legacy Binary Support)
+            // ==========================================
+            println!("\n[ POSIX ] Demonstrating Ring 0 Linux Legacy Syscall Emulation...");
+            serial_println!("\n[ POSIX ] Demonstrating Ring 0 Linux Legacy Syscall Emulation...");
+            
+            unsafe {
+                let msg = b"Hello from Legacy Linux syscall in Ring 0 SFI Sandbox!\n\0";
+                
+                // C言語バイナリが行う「sys_write(1, msg, 55)」と「sys_exit(42)」をアセンブリでエミュレート
+                core::arch::asm!(
+                    "syscall", // 発行すると Ring 0 のまま `syscall_handler` へ飛ぶ
+                    in("rax") 1, // sys_write
+                    in("rdi") 1, // fd = stdout
+                    in("rsi") msg.as_ptr(),
+                    in("rdx") msg.len() - 1,
+                    out("rcx") _, // syscall clobbers rcx and r11
+                    out("r11") _,
+                );
+                
+                core::arch::asm!(
+                    "syscall",
+                    in("rax") 60, // sys_exit
+                    in("rdi") 42, // exit code
+                    out("rcx") _,
+                    out("r11") _,
+                );
+            }
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)

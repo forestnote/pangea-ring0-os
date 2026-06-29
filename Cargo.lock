@@ -67,7 +67,7 @@ dependencies = [
 
 [[package]]
 name = "pangea-kernel"
-version = "0.0.2-2"
+version = "0.0.2-3"
 dependencies = [
  "crossbeam-queue",
  "font8x8",
