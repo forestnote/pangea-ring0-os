@@ -201,8 +201,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.4-1 に更新
-            println!("PangeaOS v0.0.4-1: Single-Level Store (SLS) & Demand Paging.");
+            // ★ バージョンとブートシグネチャを v0.0.4-2 に更新
+            println!("PangeaOS v0.0.4-2: Object Bound Checking & SLS Security.");
 
             gdt::init();
             interrupts::init_idt();
