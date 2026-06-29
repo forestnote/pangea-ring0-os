@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-6-5 に更新
-            println!("PangeaOS v0.0.1-6-5: Turing-Complete JIT Firewall.");
+            // ★ バージョンとブートシグネチャを v0.0.1-7 に更新
+            println!("PangeaOS v0.0.1-7: Ring 0 FFI & Kernel Callbacks.");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,10 +226,10 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Turing-Complete JIT Firewall)
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (v0.0.1-7: Ring 0 FFI)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Turing-Complete Mode)...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Turing-Complete Mode)...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (FFI & Callback Mode)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (FFI & Callback Mode)...");
 
             let mut ctx = AshContext { data: [0; 64], state: [0; 8] };
             // Mock IPv4 Packet
@@ -238,34 +238,31 @@ pub extern "C" fn _start() -> ! {
             ctx.data[13] = 168;
             ctx.data[14] = 1;
             ctx.data[15] = 1;
-            ctx.data[16] = 10;  // Dst IP: 10.0.0.2
-            ctx.data[17] = 0;
-            ctx.data[18] = 0;
-            ctx.data[19] = 2;
-            
-            // We want to calculate the sum of bytes [12] to [15] using a Loop!
-            // Wait, let's use LoadNet32 instead!
             
             let bytecode = [
-                // 1. Endian-Aware Access: Load Src IP (32-bit Big Endian) into R1
-                Instruction::LoadImm(Reg::R4, 12), // offset 12
+                // 1. Get initial TSC Time (Helper 0)
+                Instruction::CallExt(0), // Sets R0 = TSC
+                Instruction::StoreState(Reg::R0, 2), // Save initial time to state[2]
+                
+                // 2. Load Src IP (32-bit Endian-Aware)
+                Instruction::LoadImm(Reg::R4, 12),
                 Instruction::LoadNet32(Reg::R1, Reg::R4), // R1 = 0xC0A80101 (192.168.1.1)
                 
-                // Store the loaded IP into State[0]
-                Instruction::StoreState(Reg::R1, 0),
+                // 3. Print the IP address from within JIT! (Helper 1 takes R1)
+                Instruction::CallExt(1),
                 
-                // 2. Turing-Complete Bounded Loop: Calculate sum of numbers 1 to 10
-                Instruction::LoadImm(Reg::R2, 0), // sum
-                Instruction::LoadImm(Reg::R3, 10), // counter
-                
-                // --- Loop Target ---
-                // Add counter to sum
+                // 4. Do some work (Turing-Complete Loop)
+                Instruction::LoadImm(Reg::R2, 0),
+                Instruction::LoadImm(Reg::R3, 100),
                 Instruction::Add(Reg::R2, Reg::R3),
-                // Loop backward 1 instruction (jump to Add). It automatically decrements R3!
                 Instruction::LoopBwd(Reg::R3, 1),
+                Instruction::StoreState(Reg::R2, 1), // Store loop sum
                 
-                // Store the result (sum of 1 to 10 = 55) into State[1]
-                Instruction::StoreState(Reg::R2, 1),
+                // 5. Get final TSC Time
+                Instruction::CallExt(0), // R0 = new TSC
+                Instruction::LoadState(Reg::R3, 2), // R3 = initial TSC
+                Instruction::Sub(Reg::R0, Reg::R3), // R0 = R0 - R3 (Elapsed TSC ticks)
+                Instruction::StoreState(Reg::R0, 2), // Store elapsed time to state[2]
 
                 // Accept packet (R0 = 1)
                 Instruction::LoadImm(Reg::R0, 1),
@@ -289,10 +286,10 @@ pub extern "C" fn _start() -> ! {
 
             println!("        -> [ ASH JIT ] Native Result: {}", native_result);
             serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
-            println!("        -> [ ASH JIT ] Parsed Src IP (State[0]): {:#10x} (Expected: 0xc0a80101)", ctx.state[0]);
-            serial_println!("        -> [ ASH JIT ] Parsed Src IP (State[0]): {:#10x} (Expected: 0xc0a80101)", ctx.state[0]);
-            println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {} (Expected: 55)", ctx.state[1]);
-            serial_println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {} (Expected: 55)", ctx.state[1]);
+            println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", ctx.state[1]);
+            serial_println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", ctx.state[1]);
+            println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", ctx.state[2]);
+            serial_println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", ctx.state[2]);
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)

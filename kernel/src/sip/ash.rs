@@ -30,7 +30,17 @@ pub enum Instruction {
     StoreStateDyn(Reg, Reg),
     LoadNet32(Reg, Reg),
     LoopBwd(Reg, u8),
+    CallExt(u8),
     Exit,
+}
+
+pub extern "C" fn helper_get_time() -> u64 {
+    unsafe { core::arch::x86_64::_rdtsc() }
+}
+
+pub extern "C" fn helper_debug_print(val: u64) -> u64 {
+    crate::serial_println!("[ ASH JIT LOG ] Value: {:#10x} ({})", val, val);
+    0
 }
 
 pub struct AshContext {
@@ -123,6 +133,18 @@ impl AshVm {
                     self.registers[r as usize] = self.registers[r as usize].wrapping_sub(1);
                     if self.registers[r as usize] != 0 {
                         pc = pc.saturating_sub(count as usize + 1);
+                    }
+                }
+                Instruction::CallExt(func_id) => {
+                    match func_id {
+                        0 => {
+                            self.registers[Reg::R0 as usize] = unsafe { core::arch::x86_64::_rdtsc() };
+                        }
+                        1 => {
+                            crate::serial_println!("[ ASH JIT LOG ] Value: {:#10x} ({})", self.registers[Reg::R1 as usize], self.registers[Reg::R1 as usize]);
+                            self.registers[Reg::R0 as usize] = 0;
+                        }
+                        _ => {}
                     }
                 }
                 Instruction::Exit => break,
@@ -328,6 +350,39 @@ impl AshJit {
                     assert!(rel8 >= -128 && rel8 <= 127, "LoopBwd target too far");
                     code.push(0x75);
                     code.push(rel8 as u8);
+                }
+                Instruction::CallExt(func_id) => {
+                    // Save caller-saved registers & context, and align stack to 16 bytes
+                    code.push(0x57); // push rdi
+                    code.push(0x51); // push rcx
+                    code.push(0x52); // push rdx
+                    code.push(0x56); // push rsi
+                    code.push(0x50); // push rax (dummy for 16-byte alignment)
+
+                    let addr = match func_id {
+                        0 => helper_get_time as usize,
+                        1 => {
+                            // mov rdi, rcx (Pass R1 as first argument)
+                            code.push(0x48); code.push(0x89); code.push(0xcf);
+                            helper_debug_print as usize
+                        }
+                        _ => 0,
+                    };
+
+                    if addr != 0 {
+                        // mov r11, addr
+                        code.push(0x49); code.push(0xbb);
+                        code.extend_from_slice(&addr.to_le_bytes());
+                        // call r11
+                        code.push(0x41); code.push(0xff); code.push(0xd3);
+                    }
+
+                    // Restore registers (use r8 for dummy pop to preserve rax return value)
+                    code.push(0x41); code.push(0x58); // pop r8
+                    code.push(0x5e); // pop rsi
+                    code.push(0x5a); // pop rdx
+                    code.push(0x59); // pop rcx
+                    code.push(0x5f); // pop rdi
                 }
                 Instruction::Exit => {
                     code.push(0x5d); // pop rbp
