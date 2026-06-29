@@ -1,6 +1,6 @@
 <div align="center">
 <h1>PangeaOS Ring 0: The Singularity Engine</h1>
-  <p><strong>Version v0.0.4 "Single-Level Store (Orthogonal Persistence)"</strong></p>
+  <p><strong>Version v0.0.6 "Advanced Hardware Control & IOAPIC Mastery"</strong></p>
   <p>
     Rust言語の持つ「強力な型システム」「所有権構造」「ゼロコスト抽象化」を極限まで活かし、ハードウェアの直上（リング0）で動作する次世代のベアメタル・オペレーティングシステムを構築する研究開発プロジェクト。
   </p>
