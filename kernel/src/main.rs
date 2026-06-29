@@ -203,8 +203,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.5-7 に更新
-            println!("PangeaOS v0.0.5-7: Ultra-high-speed Network Stack & Ring 0 Web Server.");
+            // ★ バージョンとブートシグネチャを v0.0.5-8 に更新
+            println!("PangeaOS v0.0.5-8: Ultra-high-speed Network Stack & Ring 0 Web Server.");
 
             gdt::init();
             interrupts::init_idt();
