@@ -25,7 +25,10 @@ iso: build
 
 run: iso
 	@echo "[+] Booting PangeaOS in QEMU..."
-	@qemu-system-x86_64 -cpu max -smp 4 -m 2G -cdrom $(ISO_NAME) -serial stdio -netdev user,id=n0,hostfwd=tcp::8888-:80 -device e1000,netdev=n0
+	@if [ ! -f nvme.img ]; then dd if=/dev/zero of=nvme.img bs=1M count=64 > /dev/null 2>&1; fi
+	@qemu-system-x86_64 -cpu max -smp 4 -m 2G -cdrom $(ISO_NAME) -serial stdio \
+		-netdev user,id=n0,hostfwd=tcp::8888-:80 -device e1000,netdev=n0 \
+		-drive file=nvme.img,if=none,id=drv0,format=raw -device nvme,serial=deadbeef,drive=drv0
 
 clean:
 	@echo "[+] Purging build artifacts..."

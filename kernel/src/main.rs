@@ -31,6 +31,7 @@ pub mod sls;
 pub mod smp;
 pub mod pci;
 pub mod net;
+pub mod nvme;
 
 // --- POSIX システムコール互換レイヤー ---
 pub mod syscall;
@@ -204,8 +205,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.6-1 に更新
-            println!("PangeaOS v0.0.6-1: Ultimate Hardware IOAPIC Mastery.");
+            // ★ バージョンとブートシグネチャを v0.0.6-2 に更新
+            println!("PangeaOS v0.0.6-2: PCIe NVMe Native Zero-Copy Driver.");
 
             gdt::init();
             interrupts::init_idt();
@@ -261,9 +262,9 @@ pub extern "C" fn _start() -> ! {
                 println!("[ SLS ] Object {:#x} Capability Token: {:#x}", oid.0, cap_token);
                 
                 // Initialize PCI and Networking
-                let e1000_mmio = pci::init();
+                let pci_res = pci::init();
                 
-                if let Some((phys_addr, _irq)) = e1000_mmio {
+                if let Some((phys_addr, _irq)) = pci_res.e1000 {
                     use x86_64::structures::paging::{Page, PhysFrame, Mapper, Size4KiB, PageTableFlags};
                     use x86_64::{VirtAddr, PhysAddr};
                     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE | PageTableFlags::NO_EXECUTE;
@@ -282,7 +283,36 @@ pub extern "C" fn _start() -> ! {
                     drop(pmm_guard);
                 }
                 
-                net::init(phys_mem_offset.as_u64(), e1000_mmio);
+                net::init(phys_mem_offset.as_u64(), pci_res.e1000);
+                
+                if let Some((phys_addr, _irq)) = pci_res.nvme {
+                    use x86_64::structures::paging::{Page, PhysFrame, Mapper, Size4KiB, PageTableFlags};
+                    use x86_64::{VirtAddr, PhysAddr};
+                    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE | PageTableFlags::NO_EXECUTE;
+                    let start_frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys_addr as u64));
+                    let end_frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys_addr as u64 + 0x4000 - 1)); // 16KB is usually enough for NVMe registers
+                    
+                    let mut pmm_guard = crate::pmm::PMM.lock();
+                    let frame_alloc = pmm_guard.as_mut().unwrap();
+                    for frame in PhysFrame::range_inclusive(start_frame, end_frame) {
+                        let page = Page::<Size4KiB>::containing_address(VirtAddr::new(phys_mem_offset.as_u64() + frame.start_address().as_u64()));
+                        unsafe {
+                            let _ = mapper.map_to(page, frame, flags, frame_alloc).map(|tlb| tlb.flush());
+                        }
+                    }
+                    
+                    // Allocate frames for ASQ and ACQ
+                    let asq_phys = frame_alloc.allocate_frame().unwrap() as u64;
+                    let acq_phys = frame_alloc.allocate_frame().unwrap() as u64;
+                    drop(pmm_guard);
+                    
+                    let mut nvme = nvme::NvmeController::new(
+                        phys_mem_offset.as_u64() + phys_addr as u64,
+                        asq_phys,
+                        acq_phys
+                    );
+                    nvme.init();
+                }
                 
                 let bsp_lapic_id = apic::lapic_id();
                 *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);
