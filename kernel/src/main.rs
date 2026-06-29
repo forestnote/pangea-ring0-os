@@ -201,8 +201,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.4-4 に更新
-            println!("PangeaOS v0.0.4-4: Lock-Free Anti-Exhaustion DoS Defense.");
+            // ★ バージョンとブートシグネチャを v0.0.4-5 に更新
+            println!("PangeaOS v0.0.4-5: Transparent Memory Encryption (TME).");
 
             gdt::init();
             interrupts::init_idt();
@@ -262,6 +262,9 @@ pub extern "C" fn _start() -> ! {
                     *test_ptr = 0xDEADBEEF_C0DEF00D;
                     println!("[ OK ] Write successful! Value read back: {:#x}", *test_ptr);
                 }
+                
+                // Simulate saving the object
+                sls::commit_object(oid);
 
             } else {
                 panic!("Failed to get Memory Map or HHDM offset.");
