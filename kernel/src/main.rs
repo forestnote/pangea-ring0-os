@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-6-4 に更新
-            println!("PangeaOS v0.0.1-6-4: Stateful Ring 0 JIT Firewall.");
+            // ★ バージョンとブートシグネチャを v0.0.1-6-5 に更新
+            println!("PangeaOS v0.0.1-6-5: Turing-Complete JIT Firewall.");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,47 +226,46 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Stateful Firewall)
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Turing-Complete JIT Firewall)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Stateful Firewall Mode)...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Stateful Firewall Mode)...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Turing-Complete Mode)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Turing-Complete Mode)...");
 
             let mut ctx = AshContext { data: [0; 64], state: [0; 8] };
-            // Mock IPv4 Header
-            ctx.data[0] = 0x45;
-            ctx.data[2] = 0x01;
-            ctx.data[3] = 0xBB;
-            ctx.data[10] = 0x00; // Checksum placeholder
+            // Mock IPv4 Packet
+            ctx.data[0] = 0x45; // Version 4, IHL 5
+            ctx.data[12] = 192; // Src IP: 192.168.1.1
+            ctx.data[13] = 168;
+            ctx.data[14] = 1;
+            ctx.data[15] = 1;
+            ctx.data[16] = 10;  // Dst IP: 10.0.0.2
+            ctx.data[17] = 0;
+            ctx.data[18] = 0;
+            ctx.data[19] = 2;
             
-            // Set initial state (e.g. connection counter)
-            ctx.state[0] = 5;
-
+            // We want to calculate the sum of bytes [12] to [15] using a Loop!
+            // Wait, let's use LoadNet32 instead!
+            
             let bytecode = [
-                // 1. Stateful Access: Load connection count from State[0]
-                Instruction::LoadState(Reg::R1, 0), // R1 = state[0]
+                // 1. Endian-Aware Access: Load Src IP (32-bit Big Endian) into R1
+                Instruction::LoadImm(Reg::R4, 12), // offset 12
+                Instruction::LoadNet32(Reg::R1, Reg::R4), // R1 = 0xC0A80101 (192.168.1.1)
                 
-                // 2. Increment connection count
-                Instruction::LoadImm(Reg::R2, 1),
-                Instruction::Add(Reg::R1, Reg::R2), // R1 = R1 + 1
+                // Store the loaded IP into State[0]
+                Instruction::StoreState(Reg::R1, 0),
                 
-                // 3. Store back to State[0]
-                Instruction::StoreState(Reg::R1, 0), // state[0] = R1
+                // 2. Turing-Complete Bounded Loop: Calculate sum of numbers 1 to 10
+                Instruction::LoadImm(Reg::R2, 0), // sum
+                Instruction::LoadImm(Reg::R3, 10), // counter
                 
-                // 4. Rate Limiting Check: If connections > 10, drop packet
-                Instruction::LoadImm(Reg::R3, 10),
-                Instruction::JltFwd(Reg::R1, Reg::R3, 2), // If R1 < 10, skip drop
+                // --- Loop Target ---
+                // Add counter to sum
+                Instruction::Add(Reg::R2, Reg::R3),
+                // Loop backward 1 instruction (jump to Add). It automatically decrements R3!
+                Instruction::LoopBwd(Reg::R3, 1),
                 
-                // Drop packet (R0 = 0)
-                Instruction::LoadImm(Reg::R0, 0),
-                Instruction::Exit,
-                
-                // 5. Dynamic Packet Rewriting (Zero-Cost MBC)
-                // Read byte at dynamic offset 3, XOR with state[0], store at 10
-                Instruction::LoadImm(Reg::R4, 3), // Offset 3
-                Instruction::LoadDyn(Reg::R5, Reg::R4), // R5 = data[3]
-                Instruction::Xor(Reg::R5, Reg::R1), // R5 = data[3] ^ state[0]
-                Instruction::LoadImm(Reg::R2, 10), // Offset 10
-                Instruction::StoreDyn(Reg::R5, Reg::R2), // data[10] = R5
+                // Store the result (sum of 1 to 10 = 55) into State[1]
+                Instruction::StoreState(Reg::R2, 1),
 
                 // Accept packet (R0 = 1)
                 Instruction::LoadImm(Reg::R0, 1),
@@ -290,10 +289,10 @@ pub extern "C" fn _start() -> ! {
 
             println!("        -> [ ASH JIT ] Native Result: {}", native_result);
             serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
-            println!("        -> [ ASH JIT ] New Connection Count (State[0]): {}", ctx.state[0]);
-            serial_println!("        -> [ ASH JIT ] New Connection Count (State[0]): {}", ctx.state[0]);
-            println!("        -> [ ASH JIT ] Packet Byte 10 (Stateful Dynamic XOR): {:#04x}", ctx.data[10]);
-            serial_println!("        -> [ ASH JIT ] Packet Byte 10 (Stateful Dynamic XOR): {:#04x}", ctx.data[10]);
+            println!("        -> [ ASH JIT ] Parsed Src IP (State[0]): {:#10x} (Expected: 0xc0a80101)", ctx.state[0]);
+            serial_println!("        -> [ ASH JIT ] Parsed Src IP (State[0]): {:#10x} (Expected: 0xc0a80101)", ctx.state[0]);
+            println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {} (Expected: 55)", ctx.state[1]);
+            serial_println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {} (Expected: 55)", ctx.state[1]);
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)
