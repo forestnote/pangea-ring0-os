@@ -102,6 +102,7 @@ pub struct AshContext {
     pub state: CheriCap<u64>, // Offset 24
 }
 
+#[derive(Clone)]
 pub struct AshVm { registers: [u64; 6] }
 
 impl AshVm {
@@ -609,5 +610,60 @@ impl Drop for AshJit {
 
         // ページ属性を浄化した後、安全にメモリをアロケータへ返却する
         unsafe { dealloc(self.buffer, self.layout); }
+    }
+}
+
+use alloc::sync::Arc;
+
+/// A pure Ring-0 Micro-Process based on the ASH JIT Sandbox.
+pub struct AshProcess {
+    memory_buf: Vec<u8>,
+    state_buf: Vec<u64>,
+    jit: Arc<AshJit>,
+    pub vm: AshVm,
+}
+
+impl AshProcess {
+    pub fn new(memory_size: usize, state_size: usize, jit: Arc<AshJit>) -> Self {
+        assert!(memory_size.is_power_of_two(), "Memory size must be a power of two");
+        assert!(state_size.is_power_of_two(), "State size must be a power of two");
+
+        Self {
+            memory_buf: alloc::vec![0u8; memory_size],
+            state_buf: alloc::vec![0u64; state_size],
+            jit,
+            vm: AshVm::new(),
+        }
+    }
+
+    /// µFork (Micro-fork): 
+    /// Instantly duplicates the sandbox process. 
+    /// - JIT Code is shared automatically (Arc/RX Page).
+    /// - Data and State are deep-copied via memcpy (faster than CR3 CoW faults for small sandboxes).
+    pub fn ufork(&self) -> Self {
+        Self {
+            memory_buf: self.memory_buf.clone(),
+            state_buf: self.state_buf.clone(),
+            jit: Arc::clone(&self.jit),
+            vm: self.vm.clone(),
+        }
+    }
+
+    pub fn memory_mut(&mut self) -> &mut [u8] {
+        &mut self.memory_buf
+    }
+
+    pub fn state(&self) -> &[u64] {
+        &self.state_buf
+    }
+
+    pub fn execute(&mut self) -> u64 {
+        let mut ctx = unsafe {
+            AshContext {
+                memory: CheriCap::new_root(self.memory_buf.as_mut_ptr(), self.memory_buf.len(), Perms::RW),
+                state: CheriCap::new_root(self.state_buf.as_mut_ptr(), self.state_buf.len(), Perms::RW),
+            }
+        };
+        unsafe { self.jit.execute(&mut ctx) }
     }
 }

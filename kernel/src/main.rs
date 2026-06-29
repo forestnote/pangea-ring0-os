@@ -34,8 +34,9 @@ use sip::{Sip, SipEnv};
 // ★ IPC、ASH、フォーマットのインポート
 use alloc::string::String;
 use alloc::format;
+use alloc::sync::Arc;
 use sip::ipc::{self, Sender, Receiver};
-use sip::ash::{AshContext, CheriCap, Perms, Instruction, Reg, AshJit};
+use sip::ash::{Instruction, Reg, AshJit, AshProcess};
 
 // ★ 仮想メモリマッパー(VMM)をグローバルに公開し、W^X防壁を操作可能にする
 use spin::Mutex;
@@ -233,27 +234,10 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (v0.0.1-9: Ultimate Sandbox)
+            // ★ Phase 5: µFork (マイクロフォーク) プロセスメカニズムの確立
             // ==========================================
             println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Ultimate Secure Mode)...");
             serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Ultimate Secure Mode)...");
-
-            let mut data_buf = [0u8; 64];
-            let mut state_buf = [0u64; 8];
-
-            // Mock IPv4 Packet
-            data_buf[0] = 0x45; // Version 4, IHL 5
-            data_buf[12] = 192; // Src IP: 192.168.1.1
-            data_buf[13] = 168;
-            data_buf[14] = 1;
-            data_buf[15] = 1;
-
-            let mut ctx = unsafe {
-                AshContext {
-                    memory: CheriCap::new_root(data_buf.as_mut_ptr(), 64, Perms::RW),
-                    state: CheriCap::new_root(state_buf.as_mut_ptr(), 8, Perms::RW),
-                }
-            };
             
             let bytecode = [
                 // 1. Get initial TSC Time (Helper 0)
@@ -299,17 +283,50 @@ pub extern "C" fn _start() -> ! {
             serial_println!("[ ASH JIT ] Sealing Memory Page (W^X Enforcer Active)...");
             jit.seal();
 
+            // Arc で JIT コードを共有可能な状態にする
+            let jit_arc = Arc::new(jit);
+
+            // オリジナルのプロセス (Parent SIP) を構築
+            let mut parent_process = AshProcess::new(64, 8, Arc::clone(&jit_arc));
+            
+            // パケットデータをセット
+            let memory = parent_process.memory_mut();
+            memory[0] = 0x45;
+            memory[12] = 192; memory[13] = 168; memory[14] = 1; memory[15] = 1;
+
             println!("[ ASH JIT ] Emission Complete. Direct Execution Initiated...");
             serial_println!("[ ASH JIT ] Emission Complete. Direct Execution Initiated...");
 
-            let native_result = unsafe { jit.execute(&mut ctx) };
+            let native_result = parent_process.execute();
 
-            println!("        -> [ ASH JIT ] Native Result: {}", native_result);
-            serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
-            println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", state_buf[1]);
-            serial_println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", state_buf[1]);
-            println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", state_buf[2]);
-            serial_println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", state_buf[2]);
+            println!("        -> [ Parent SIP ] Native Result: {}", native_result);
+            serial_println!("        -> [ Parent SIP ] Native Result: {}", native_result);
+            println!("        -> [ Parent SIP ] Loop Calculation Sum (State[1]): {}", parent_process.state()[1]);
+            serial_println!("        -> [ Parent SIP ] Loop Calculation Sum (State[1]): {}", parent_process.state()[1]);
+            println!("        -> [ Parent SIP ] JIT Execution Time (TSC Ticks): {}", parent_process.state()[2]);
+            serial_println!("        -> [ Parent SIP ] JIT Execution Time (TSC Ticks): {}", parent_process.state()[2]);
+
+            // === ここから µFork の実証 ===
+            println!("\n[ µFork ] Initiating Zero-Cost Process Clone...");
+            serial_println!("\n[ µFork ] Initiating Zero-Cost Process Clone...");
+            
+            let mut child_process = parent_process.ufork();
+
+            println!("[ µFork ] Clone complete. Mutating Child's Memory Space...");
+            serial_println!("[ µFork ] Clone complete. Mutating Child's Memory Space...");
+            
+            // 子プロセスのパケットを変更 (親プロセスには影響しない)
+            let child_memory = child_process.memory_mut();
+            child_memory[15] = 2; // Src IP を 192.168.1.2 に変更
+
+            let child_result = child_process.execute();
+            
+            println!("        -> [ Child SIP ] Native Result: {}", child_result);
+            serial_println!("        -> [ Child SIP ] Native Result: {}", child_result);
+            println!("        -> [ Child SIP ] Loop Calculation Sum (State[1]): {}", child_process.state()[1]);
+            serial_println!("        -> [ Child SIP ] Loop Calculation Sum (State[1]): {}", child_process.state()[1]);
+            println!("        -> [ Child SIP ] JIT Execution Time (TSC Ticks): {}", child_process.state()[2]);
+            serial_println!("        -> [ Child SIP ] JIT Execution Time (TSC Ticks): {}", child_process.state()[2]);
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)
