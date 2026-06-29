@@ -70,6 +70,16 @@ pub fn init(
     crate::serial_println!("[ OK ] Local APIC Initialized. Timer Active.");
 }
 
+pub fn init_ap() {
+    // Enable APIC for this core
+    write_reg(APIC_SIVR, 0xFF | 0x100);
+
+    // Configure Timer
+    write_reg(APIC_LVT_TIMER, 32 | 0x20000);
+    write_reg(APIC_TIMER_DIV, 0x3);
+    write_reg(APIC_TIMER_INIT, 10_000_000);
+}
+
 pub fn eoi() {
     write_reg(APIC_EOI, 0);
 }

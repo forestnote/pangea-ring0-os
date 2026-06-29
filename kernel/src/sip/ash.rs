@@ -689,6 +689,21 @@ impl AshProcess {
         }
     }
 
+    /// Temporarily unlocks this SIP's memory for Kernel access (Ring 0)
+    pub fn allow_access(&self) {
+        let mut pkrs = 0xFFFFFFFF; // Lock all 16 keys
+        pkrs = crate::mpk::set_key_rights(pkrs, 0, false, false); // Unlock Key 0 (Kernel)
+        pkrs = crate::mpk::set_key_rights(pkrs, self.mpk_key, false, false); // Unlock this SIP
+        crate::mpk::write_pkrs(pkrs);
+    }
+
+    /// Locks this SIP's memory, preventing even the Kernel from accessing it
+    pub fn revoke_access(&self) {
+        let mut pkrs = 0xFFFFFFFF; // Lock all 16 keys
+        pkrs = crate::mpk::set_key_rights(pkrs, 0, false, false); // Unlock Key 0 (Kernel)
+        crate::mpk::write_pkrs(pkrs);
+    }
+
     pub fn memory_mut(&mut self) -> &mut [u8] {
         unsafe { core::slice::from_raw_parts_mut(self.memory_ptr, self.memory_size) }
     }

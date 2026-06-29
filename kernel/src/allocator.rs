@@ -4,7 +4,7 @@ use core::alloc::{GlobalAlloc, Layout};
 use spin::Mutex;
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-pub const HEAP_SIZE: usize = 100 * 1024; // 初期状態: 100KB
+pub const HEAP_SIZE: usize = 10 * 1024 * 1024; // 10MB
 
 pub mod mesh;
 

@@ -28,34 +28,47 @@ lazy_static! {
     pub static ref GDT: (GlobalDescriptorTable, Selectors) = {
         let mut gdt = GlobalDescriptorTable::new();
 
-        // Ring 0 (Kernel) のコードセグメントのみを定義
-        let code_selector = gdt.add_entry(Descriptor::kernel_code_segment());
-        let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));
+        // Ring 0 (Kernel) のコードセグメントとデータセグメントを定義
+        let code_selector = gdt.add_entry(Descriptor::kernel_code_segment()); // Index 1 -> 0x08
+        let data_selector = gdt.add_entry(Descriptor::kernel_data_segment()); // Index 2 -> 0x10
+        let tss_selector = gdt.add_entry(Descriptor::tss_segment(&TSS));      // Index 3 -> 0x18
 
         // Ring 3用のセレクタは完全に破棄
 
-        (gdt, Selectors { code_selector, tss_selector })
+        (gdt, Selectors { code_selector, data_selector, tss_selector })
     };
 }
 
 pub struct Selectors {
     code_selector: SegmentSelector,
+    data_selector: SegmentSelector,
     tss_selector: SegmentSelector,
 }
 
 pub fn init() {
     use x86_64::instructions::tables::load_tss;
     use x86_64::instructions::segmentation::{CS, SS, Segment};
-    use x86_64::structures::gdt::SegmentSelector;
 
     GDT.0.load();
     unsafe {
         // 現在のコードセグメントレジスタ(CS)をRing 0用に書き換え
         CS::set_reg(GDT.1.code_selector);
-        // SS (Stack Segment) レジスタに残っている古い(Limineの)セレクタを無効化 (64-bitでは0で正常)
-        SS::set_reg(SegmentSelector::new(0, x86_64::PrivilegeLevel::Ring0));
+        // SS (Stack Segment) をRing 0用に書き換え (syscall が 0x10 を要求するため)
+        SS::set_reg(GDT.1.data_selector);
         // CPUにTSSの場所を教え、ISTを有効化する
         load_tss(GDT.1.tss_selector);
     }
     crate::serial_println!("[ OK ] Ring 0 Exclusive GDT & TSS Loaded. IST Active.");
+}
+
+pub fn init_ap() {
+    use x86_64::instructions::segmentation::{CS, SS, Segment};
+
+    GDT.0.load();
+    unsafe {
+        CS::set_reg(GDT.1.code_selector);
+        SS::set_reg(GDT.1.data_selector);
+        // APs currently do not load the TSS because the shared TSS is marked busy by the BSP.
+        // For a complete SMP implementation, each AP needs its own TSS and GDT entry.
+    }
 }

@@ -24,12 +24,13 @@ pub mod sip;
 // --- ハードウェア分離・保護モジュール ---
 pub mod cpu;
 pub mod mpk;
+pub mod smp;
 
 // --- POSIX システムコール互換レイヤー ---
 pub mod syscall;
 
 use core::panic::PanicInfo;
-use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest};
+use limine::request::{FramebufferRequest, MemmapRequest, HhdmRequest, MpRequest};
 use limine::BaseRevision;
 use x86_64::VirtAddr;
 
@@ -61,6 +62,10 @@ static MEMMAP_REQUEST: MemmapRequest = MemmapRequest::new();
 #[used]
 #[link_section = ".requests"]
 static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+
+#[used]
+#[link_section = ".requests"]
+static SMP_REQUEST: MpRequest = MpRequest::new(0);
 
 #[panic_handler]
 fn panic(info: &PanicInfo) -> ! {
@@ -301,7 +306,8 @@ pub extern "C" fn _start() -> ! {
             // オリジナルのプロセス (Parent SIP) を構築 (MPK Key 1)
             let mut parent_process = AshProcess::new(4096, 4096, Arc::clone(&jit_arc), 1, hhdm_offset);
             
-            // パケットデータをセット
+            // パケットデータをセット (アクセス許可を開ける)
+            parent_process.allow_access();
             let memory = parent_process.memory_mut();
             memory[0] = 0x45;
             memory[12] = 192; memory[13] = 168; memory[14] = 1; memory[15] = 1;
@@ -313,6 +319,9 @@ pub extern "C" fn _start() -> ! {
 
             println!("        -> [ Parent SIP ] Native Result: {}", native_result);
             serial_println!("        -> [ Parent SIP ] Native Result: {}", native_result);
+            
+            // カーネルからアクセスするために一時的に保護を解除
+            parent_process.allow_access();
             println!("        -> [ Parent SIP ] Loop Calculation Sum (State[1]): {}", parent_process.state()[1]);
             serial_println!("        -> [ Parent SIP ] Loop Calculation Sum (State[1]): {}", parent_process.state()[1]);
             println!("        -> [ Parent SIP ] JIT Execution Time (TSC Ticks): {}", parent_process.state()[2]);
@@ -321,24 +330,32 @@ pub extern "C" fn _start() -> ! {
             // === ここから µFork の実証 ===
             println!("\n[ µFork ] Initiating Zero-Cost Process Clone...");
             serial_println!("\n[ µFork ] Initiating Zero-Cost Process Clone...");
-            // 子プロセスには MPK Key 2 を割り当てて分離
+            // 子プロセスには MPK Key 2 を割り当てて分離 (親のメモリを読むために allow_access 状態が必要)
             let mut child_process = parent_process.ufork(2, hhdm_offset);
+            
+            // コピーが終わったので親のアクセス権を再ロック
+            parent_process.revoke_access();
 
             println!("[ µFork ] Clone complete. Mutating Child's Memory Space...");
             serial_println!("[ µFork ] Clone complete. Mutating Child's Memory Space...");
             
-            // 子プロセスのパケットを変更 (親プロセスには影響しない)
+            // 子プロセスのパケットを変更 (アクセス許可を開ける)
+            child_process.allow_access();
             let child_memory = child_process.memory_mut();
             child_memory[15] = 2; // Src IP を 192.168.1.2 に変更
+            child_process.revoke_access();
 
             let child_result = child_process.execute();
             
             println!("        -> [ Child SIP ] Native Result: {}", child_result);
             serial_println!("        -> [ Child SIP ] Native Result: {}", child_result);
+            
+            child_process.allow_access();
             println!("        -> [ Child SIP ] Loop Calculation Sum (State[1]): {}", child_process.state()[1]);
             serial_println!("        -> [ Child SIP ] Loop Calculation Sum (State[1]): {}", child_process.state()[1]);
             println!("        -> [ Child SIP ] JIT Execution Time (TSC Ticks): {}", child_process.state()[2]);
             serial_println!("        -> [ Child SIP ] JIT Execution Time (TSC Ticks): {}", child_process.state()[2]);
+            child_process.revoke_access();
 
             // ==========================================
             // ★ Phase 5: POSIX エミュレーション (Legacy Binary Support)
@@ -352,25 +369,27 @@ pub extern "C" fn _start() -> ! {
                 // C言語バイナリが行う「sys_write(1, msg, 55)」と「sys_exit(42)」をアセンブリでエミュレート
                 core::arch::asm!(
                     "syscall", // 発行すると Ring 0 のまま `syscall_handler` へ飛ぶ
-                    in("rax") 1, // sys_write
+                    inout("rax") 1 => _, // sys_write
                     in("rdi") 1, // fd = stdout
                     in("rsi") msg.as_ptr(),
                     in("rdx") msg.len() - 1,
                     out("rcx") _, // syscall clobbers rcx and r11
                     out("r11") _,
+                    clobber_abi("C"),
                 );
                 
                 core::arch::asm!(
                     "syscall",
-                    in("rax") 60, // sys_exit
+                    inout("rax") 60 => _, // sys_exit
                     in("rdi") 42, // exit code
                     out("rcx") _,
                     out("r11") _,
+                    clobber_abi("C"),
                 );
             }
 
             // ==========================================
-            // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)
+            // ★ Phase 4: True SMP Preemption (Hardware Multi-Core)
             // ==========================================
             println!("\n[ TARGET ACQUIRED ] Igniting Fully Preemptive Zero-Cost Concurrency Engine...");
 
@@ -378,18 +397,20 @@ pub extern "C" fn _start() -> ! {
             *ALPHA_TX.lock() = Some(tx);
             *BETA_RX.lock() = Some(rx);
 
-            let thread_alpha = scheduler::Thread::new(1, alpha_thread_entry);
-            let thread_beta = scheduler::Thread::new(2, beta_thread_entry);
-            let thread_idle = scheduler::Thread::new(0, idle_thread_entry);
-
-            {
-                let mut sched = scheduler::SCHEDULER.lock();
-                sched.spawn(thread_idle);
-                sched.spawn(thread_alpha);
-                sched.spawn(thread_beta);
+            if let Some(smp_response) = SMP_REQUEST.response() {
+                for ap in smp_response.cpus() {
+                    if ap.lapic_id != apic::lapic_id() as u32 {
+                        serial_println!("[ SYSTEM ] Sending wake up signal to AP {}", ap.lapic_id);
+                        ap.bootstrap(crate::smp::ap_main, 0);
+                    }
+                }
             }
 
+            // Enable interrupts on BSP
             unsafe { core::arch::asm!("sti") };
+
+            println!("[ SYSTEM ] PangeaOS SMP Kernel Initialized. BSP entering idle loop.");
+            serial_println!("[ SYSTEM ] PangeaOS SMP Kernel Initialized. BSP entering idle loop.");
 
             loop { unsafe { core::arch::asm!("hlt") }; }
         }
