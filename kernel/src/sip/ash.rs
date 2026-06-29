@@ -340,16 +340,41 @@ impl AshJit {
                     code.push(64); // disp8 = 64
                 }
                 Instruction::StoreStateDyn(data_reg, off_reg) => {
-                    let data = Self::reg_to_x86(data_reg); let off = Self::reg_to_x86(off_reg);
-                    // mov r8, off
-                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
-                    // and r8, 7
-                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07);
-                    // mov qword ptr [rdi + r8 * 8 + 64], data
-                    code.push(0x4a); code.push(0x89);
-                    code.push(0x40 | (data << 3) | 0x04);
-                    code.push(0xc7);
-                    code.push(64); // disp8 = 64
+                Instruction::LoadStateDyn(dst, src) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    // Bounds Check: and src, 0x07 (max 8 states)
+                    // We must NOT mutate src. Use r8.
+                    code.push(0x4d); code.push(0x89); code.push(0xc0 | s); // mov r8, src
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07); // and r8, 7
+                    
+                    // State offset is rdi + 64.
+                    // We want: mov dst, [rdi + 64 + r8 * 8]
+                    // First, put (rdi + 64) into r10 (scratch). 
+                    // lea r10, [rdi + 64]
+                    code.push(0x4c); code.push(0x8d); code.push(0x57); code.push(0x40);
+                    
+                    // mov dst, [r10 + r8 * 8]
+                    // REX.W=1, R=0, X=1 (r8), B=1 (r10) -> 0x4B
+                    // Opcode: 0x8B
+                    // ModRM: mod=00, reg=d, rm=100 (SIB) -> (d << 3) | 0x04
+                    // SIB: scale=11 (*8), index=0 (r8), base=2 (r10) -> 0xC2
+                    code.push(0x4b); code.push(0x8b); code.push((d << 3) | 0x04); code.push(0xc2);
+                }
+                Instruction::StoreStateDyn(dst, src) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    // Bounds Check for dst
+                    code.push(0x4d); code.push(0x89); code.push(0xc0 | d); // mov r8, dst
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07); // and r8, 7
+                    
+                    // lea r10, [rdi + 64]
+                    code.push(0x4c); code.push(0x8d); code.push(0x57); code.push(0x40);
+                    
+                    // mov [r10 + r8 * 8], src
+                    // REX.W=1, R=0, X=1 (r8), B=1 (r10) -> 0x4B
+                    // Opcode: 0x89
+                    // ModRM: mod=00, reg=s, rm=100 (SIB) -> (s << 3) | 0x04
+                    // SIB: scale=11 (*8), index=0 (r8), base=2 (r10) -> 0xC2
+                    code.push(0x4b); code.push(0x89); code.push((s << 3) | 0x04); code.push(0xc2);
                 }
                 Instruction::LoadNet32(dst, off_reg) => {
                     let d = Self::reg_to_x86(dst); let off = Self::reg_to_x86(off_reg);
@@ -405,37 +430,53 @@ impl AshJit {
                     code.push(0xc3);
                     // GAS_OK:
 
-                    // Save caller-saved registers & context, and align stack to 16 bytes
-                    code.push(0x57); // push rdi
-                    code.push(0x51); // push rcx
-                    code.push(0x52); // push rdx
-                    code.push(0x56); // push rsi
-                    code.push(0x50); // push rax (dummy for 16-byte alignment)
+                    if func_id == 0 {
+                        // helper_get_time (Returns u64 in rax)
+                        // Push caller-saved registers: rdi, rcx, rdx, rsi, r9 (Gas counter).
+                        // 5 registers = 40 bytes. Stack becomes 16-byte aligned.
+                        code.push(0x57); // push rdi
+                        code.push(0x51); // push rcx
+                        code.push(0x52); // push rdx
+                        code.push(0x56); // push rsi
+                        code.push(0x41); code.push(0x51); // push r9
 
-                    let addr = match func_id {
-                        0 => helper_get_time as usize,
-                        1 => {
-                            // mov rdi, rcx (Pass R1 as first argument)
-                            code.push(0x48); code.push(0x89); code.push(0xcf);
-                            helper_debug_print as usize
-                        }
-                        _ => 0,
-                    };
+                        let addr = helper_get_time as usize;
+                        code.push(0x49); code.push(0xbb); code.extend_from_slice(&addr.to_le_bytes()); // mov r11, addr
+                        code.push(0x41); code.push(0xff); code.push(0xd3); // call r11
 
-                    if addr != 0 {
-                        // mov r11, addr
-                        code.push(0x49); code.push(0xbb);
-                        code.extend_from_slice(&addr.to_le_bytes());
-                        // call r11
-                        code.push(0x41); code.push(0xff); code.push(0xd3);
+                        // Pop registers. DO NOT pop rax, as it holds the return value!
+                        code.push(0x41); code.push(0x59); // pop r9
+                        code.push(0x5e); // pop rsi
+                        code.push(0x5a); // pop rdx
+                        code.push(0x59); // pop rcx
+                        code.push(0x5f); // pop rdi
+
+                    } else if func_id == 1 {
+                        // helper_debug_print (Takes arg in R1, returns nothing)
+                        // Push caller-saved registers: rdi, rcx, rdx, rsi, rax, r9.
+                        // And a dummy (r8) for 16-byte alignment (7 registers = 56 bytes).
+                        code.push(0x57); // push rdi
+                        code.push(0x51); // push rcx
+                        code.push(0x52); // push rdx
+                        code.push(0x56); // push rsi
+                        code.push(0x50); // push rax
+                        code.push(0x41); code.push(0x51); // push r9
+                        code.push(0x41); code.push(0x50); // push r8 (dummy)
+
+                        code.push(0x48); code.push(0x89); code.push(0xcf); // mov rdi, rcx (Pass R1 as first arg)
+
+                        let addr = helper_debug_print as usize;
+                        code.push(0x49); code.push(0xbb); code.extend_from_slice(&addr.to_le_bytes()); // mov r11, addr
+                        code.push(0x41); code.push(0xff); code.push(0xd3); // call r11
+
+                        code.push(0x41); code.push(0x58); // pop r8 (dummy)
+                        code.push(0x41); code.push(0x59); // pop r9
+                        code.push(0x58); // pop rax
+                        code.push(0x5e); // pop rsi
+                        code.push(0x5a); // pop rdx
+                        code.push(0x59); // pop rcx
+                        code.push(0x5f); // pop rdi
                     }
-
-                    // Restore registers (use r8 for dummy pop to preserve rax return value)
-                    code.push(0x41); code.push(0x58); // pop r8
-                    code.push(0x5e); // pop rsi
-                    code.push(0x5a); // pop rdx
-                    code.push(0x59); // pop rcx
-                    code.push(0x5f); // pop rdi
                 }
                 Instruction::Exit => {
                     code.push(0x5d); // pop rbp
