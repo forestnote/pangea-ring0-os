@@ -161,6 +161,7 @@ pub struct AshJit {
     buffer: *mut u8,
     layout: Layout,
     len: usize,
+    blind_key: u64, // JIT Spraying Defense (Constant Blinding Key)
 }
 
 impl AshJit {
@@ -169,7 +170,9 @@ impl AshJit {
         // これにより、このページをRead-Onlyに変更しても他のヒープデータに影響が及ばない。
         let layout = Layout::from_size_align(4096, 4096).unwrap();
         let buffer = unsafe { alloc(layout) };
-        AshJit { buffer, layout, len: 0 }
+        // JIT Spraying攻撃を防ぐための乱数キー（簡易的にTSCを使用）
+        let blind_key = unsafe { core::arch::x86_64::_rdtsc() };
+        AshJit { buffer, layout, len: 0, blind_key }
     }
 
     fn reg_to_x86(reg: Reg) -> u8 {
@@ -202,7 +205,16 @@ impl AshJit {
             match instr {
                 Instruction::LoadImm(reg, val) => {
                     let dst = Self::reg_to_x86(reg);
-                    code.push(0x48); code.push(0xb8 + dst); code.extend_from_slice(&val.to_le_bytes());
+                    // 【Constant Blinding】
+                    // 攻撃者が LoadImm を用いてシェルコードを JIT メモリに埋め込む "JIT Spraying" を防ぐため、
+                    // 即値を乱数キーで XOR 難読化してからメモリに書き込み、実行時に復元する。
+                    let blinded = val ^ self.blind_key;
+                    // mov dst, blinded
+                    code.push(0x48); code.push(0xb8 + dst); code.extend_from_slice(&blinded.to_le_bytes());
+                    // mov r8, blind_key
+                    code.push(0x49); code.push(0xb8); code.extend_from_slice(&self.blind_key.to_le_bytes());
+                    // xor dst, r8
+                    code.push(0x4c); code.push(0x31); code.push(0xc0 | dst);
                 }
                 Instruction::Add(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
@@ -380,6 +392,19 @@ impl AshJit {
                     code.push(rel8 as u8);
                 }
                 Instruction::CallExt(func_id) => {
+                    // GAS CHECK for CallExt (Cost: 1000 Gas)
+                    // FFI コールは重い処理であるため、大量に呼び出されて DoS になるのを防ぐ
+                    // sub r9, 1000
+                    code.push(0x49); code.push(0x81); code.push(0xe9); code.extend_from_slice(&1000u32.to_le_bytes());
+                    // jns GAS_OK (skip next 5 bytes)
+                    code.push(0x79); code.push(0x05);
+                    // GAS_DEPLETED: return 0 early
+                    code.push(0x31); code.push(0xc0);
+                    code.push(0x5d);
+                    code.push(0x5b);
+                    code.push(0xc3);
+                    // GAS_OK:
+
                     // Save caller-saved registers & context, and align stack to 16 bytes
                     code.push(0x57); // push rdi
                     code.push(0x51); // push rcx

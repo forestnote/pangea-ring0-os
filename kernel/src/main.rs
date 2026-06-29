@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-8 に更新
-            println!("PangeaOS v0.0.1-8: Secure JIT Sandbox (Gas Limits & Bounds Checks).");
+            // ★ バージョンとブートシグネチャを v0.0.1-9 に更新
+            println!("PangeaOS v0.0.1-9: Ultimate JIT Security (Constant Blinding).");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,10 +226,10 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (v0.0.1-8: Secure Sandbox)
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (v0.0.1-9: Ultimate Sandbox)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Secure Mode with Gas Limits)...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Secure Mode with Gas Limits)...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Ultimate Secure Mode)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Ultimate Secure Mode)...");
 
             let mut ctx = AshContext { data: [0; 64], state: [0; 8] };
             // Mock IPv4 Packet
