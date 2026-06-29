@@ -256,8 +256,28 @@ pub extern "C" fn _start() -> ! {
                 println!("[ SLS ] Object {:#x} Capability Token: {:#x}", oid.0, cap_token);
                 
                 // Initialize PCI and Networking
-                pci::init();
-                net::init();
+                let e1000_mmio = pci::init();
+                
+                if let Some((_, _, _, phys_addr)) = e1000_mmio {
+                    use x86_64::structures::paging::{Page, PhysFrame, Mapper, Size4KiB, PageTableFlags};
+                    use x86_64::{VirtAddr, PhysAddr};
+                    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE | PageTableFlags::NO_EXECUTE;
+                    let start_frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys_addr as u64));
+                    // Map 128KB for E1000 MMIO
+                    let end_frame = PhysFrame::<Size4KiB>::containing_address(PhysAddr::new(phys_addr as u64 + 0x20000 - 1)); 
+                    
+                    let mut pmm_guard = crate::pmm::PMM.lock();
+                    let frame_alloc = pmm_guard.as_mut().unwrap();
+                    for frame in PhysFrame::range_inclusive(start_frame, end_frame) {
+                        let page = Page::<Size4KiB>::containing_address(VirtAddr::new(phys_mem_offset.as_u64() + frame.start_address().as_u64()));
+                        unsafe {
+                            mapper.map_to(page, frame, flags, frame_alloc).unwrap().flush();
+                        }
+                    }
+                    drop(pmm_guard);
+                }
+                
+                net::init(phys_mem_offset.as_u64(), e1000_mmio);
                 
                 let bsp_lapic_id = apic::lapic_id();
                 *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);
