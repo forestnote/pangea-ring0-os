@@ -142,8 +142,15 @@ extern "x86-interrupt" fn gpf_handler(stack_frame: InterruptStackFrame, error_co
 
 extern "x86-interrupt" fn page_fault_handler(stack_frame: InterruptStackFrame, error_code: PageFaultErrorCode) {
     use x86_64::registers::control::Cr2;
+    let fault_addr = Cr2::read().as_u64();
+
+    if fault_addr >= crate::sls::SLS_VIRTUAL_BASE && fault_addr <= crate::sls::SLS_VIRTUAL_MAX {
+        crate::sls::handle_page_fault(fault_addr);
+        return;
+    }
+
     println!("\n[ KERNEL PANIC ] PAGE FAULT");
-    println!("Accessed Address: {:?}", Cr2::read());
+    println!("Accessed Address: {:#x}", fault_addr);
     serial_println!("\n[ KERNEL PANIC ] PAGE FAULT");
     serial_println!("Accessed Address: {:?}", Cr2::read());
     serial_println!("Error Code: {:?}", error_code);

@@ -247,10 +247,17 @@ pub extern "C" fn _start() -> ! {
                 println!("[ OK ] Global Heap Mapped. Allocator Ready.");
 
                 sls::initialize();
-                sls::create_object(sls::ObjectId(0x9999), 4096);
-
+                let demo_ptr = sls::create_object(sls::ObjectId(0x9999), 4096);
+                
                 let bsp_lapic_id = apic::lapic_id();
                 *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);
+                
+                println!("[ SYSTEM ] Triggering Demand Paging on SLS Object...");
+                let test_ptr = demo_ptr as *mut u64;
+                unsafe {
+                    *test_ptr = 0xDEADBEEF_C0DEF00D;
+                    println!("[ OK ] Write successful! Value read back: {:#x}", *test_ptr);
+                }
 
             } else {
                 panic!("Failed to get Memory Map or HHDM offset.");
