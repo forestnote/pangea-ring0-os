@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PangeaOS - Ring 0 Singularity Engine</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@300;400;600;700&family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="noise"></div>
+    <div class="grid-bg"></div>
+    
+    <nav class="navbar">
+        <div class="logo">PangeaOS<span class="blink">_</span></div>
+        <ul class="nav-links">
+            <li><a href="#features">Architecture</a></li>
+            <li><a href="#terminal">Console</a></li>
+            <li><a href="https://github.com/kayo/pangea-ring0-os" target="_blank" class="btn">View Source</a></li>
+        </ul>
+    </nav>
+
+    <header class="hero">
+        <div class="hero-content">
+            <h1 class="glitch" data-text="Ring 0 Singularity">Ring 0 Singularity</h1>
+            <p class="subtitle">Offensive Defense. Zero-Cost Abstraction. Absolute Hardware Domination.</p>
+            <div class="cta-group">
+                <a href="#terminal" class="btn primary">Boot System</a>
+                <a href="#features" class="btn secondary">Read the Docs</a>
+            </div>
+        </div>
+    </header>
+
+    <section id="terminal" class="terminal-section">
+        <div class="terminal-window">
+            <div class="terminal-header">
+                <span class="btn-close"></span>
+                <span class="btn-min"></span>
+                <span class="btn-max"></span>
+                <div class="terminal-title">ash@ring0:~</div>
+            </div>
+            <div class="terminal-body" id="term-body">
+                <!-- JS will type out the output -->
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="features">
+        <h2>Core Architecture</h2>
+        <div class="cards">
+            <div class="card">
+                <div class="card-icon">⚡</div>
+                <h3>Turing-Complete JIT</h3>
+                <p>Application-Specific Safe Handlers (ASH) compiled directly to x86_64 native code in Ring 0. Full support for Bounded Loops and Endian-Aware Access.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">🛡️</div>
+                <h3>W^X Enforcer</h3>
+                <p>Dynamic page table manipulation ensures memory is either Writeable or Executable, never both. Shellcode execution is architecturally impossible.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">🧠</div>
+                <h3>Zero-Cost MBC</h3>
+                <p>Mask-Based Bounds Checking. 100% branchless out-of-bounds protection using bitwise masks to prevent CPU branch misprediction penalties.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">🔗</div>
+                <h3>Ownership-Driven IPC</h3>
+                <p>Zero-copy Inter-Process Communication powered by Rust's ownership model. Data races eliminated at compile time without hardware MMU overhead.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">⏱️</div>
+                <h3>Ring 0 FFI</h3>
+                <p>JIT escapes the sandbox safely via Kernel Callbacks, directly accessing high-precision TSC timers and kernel logging capabilities.</p>
+            </div>
+            <div class="card">
+                <div class="card-icon">📦</div>
+                <h3>True Mesh Allocator</h3>
+                <p>Scratch-built Size-Class Segregated Free List allocator. O(1) allocation for Ring 0 dynamic structures without fragmentation.</p>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 pangea-ring0-os developers. Designed for Hackers.</p>
+        <p><a href="https://argleton-ghoti.com/" target="_blank">argleton-ghoti.com</a></p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
