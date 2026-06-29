@@ -112,17 +112,17 @@ impl AshVm {
                     context.state[off] = self.registers[data as usize];
                 }
                 Instruction::LoadNet32(dst, off_reg) => {
-                    let off = (self.registers[*off_reg as usize] & 0x3C) as usize;
+                    let off = (self.registers[off_reg as usize] & 0x3C) as usize;
                     let b0 = context.data[off] as u64;
                     let b1 = context.data[off + 1] as u64;
                     let b2 = context.data[off + 2] as u64;
                     let b3 = context.data[off + 3] as u64;
-                    self.registers[*dst as usize] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
+                    self.registers[dst as usize] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
                 }
                 Instruction::LoopBwd(r, count) => {
-                    self.registers[*r as usize] = self.registers[*r as usize].wrapping_sub(1);
-                    if self.registers[*r as usize] != 0 {
-                        pc = pc.saturating_sub(*count as usize + 1);
+                    self.registers[r as usize] = self.registers[r as usize].wrapping_sub(1);
+                    if self.registers[r as usize] != 0 {
+                        pc = pc.saturating_sub(count as usize + 1);
                     }
                 }
                 Instruction::Exit => break,
@@ -306,7 +306,7 @@ impl AshJit {
                     code.push(64); // disp8 = 64
                 }
                 Instruction::LoadNet32(dst, off_reg) => {
-                    let d = Self::reg_to_x86(*dst); let off = Self::reg_to_x86(*off_reg);
+                    let d = Self::reg_to_x86(dst); let off = Self::reg_to_x86(off_reg);
                     // and off_reg, 60 (0x3C)
                     code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x3C);
                     // mov r32, dword ptr [rdi + off_reg]
@@ -317,9 +317,9 @@ impl AshJit {
                     code.push(0x0f); code.push(0xc8 | d);
                 }
                 Instruction::LoopBwd(r, count) => {
-                    let target_idx = i.saturating_sub(*count as usize);
+                    let target_idx = i.saturating_sub(count as usize);
                     let target_offset = instr_offsets[target_idx];
-                    let reg = Self::reg_to_x86(*r);
+                    let reg = Self::reg_to_x86(r);
                     // dec reg (64-bit)
                     code.push(0x48); code.push(0xFF); code.push(0xC8 | reg);
                     // jnz rel8
