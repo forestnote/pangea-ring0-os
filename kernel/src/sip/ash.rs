@@ -617,22 +617,42 @@ use alloc::sync::Arc;
 
 /// A pure Ring-0 Micro-Process based on the ASH JIT Sandbox.
 pub struct AshProcess {
-    memory_buf: Vec<u8>,
-    state_buf: Vec<u64>,
+    memory_ptr: *mut u8,
+    memory_size: usize,
+    state_ptr: *mut u64,
+    state_size: usize,
     jit: Arc<AshJit>,
     pub vm: AshVm,
+    pub mpk_key: u8,
 }
 
 impl AshProcess {
-    pub fn new(memory_size: usize, state_size: usize, jit: Arc<AshJit>) -> Self {
+    pub fn new(memory_size: usize, state_size: usize, jit: Arc<AshJit>, mpk_key: u8, hhdm_offset: u64) -> Self {
+        use alloc::alloc::{alloc_zeroed, Layout};
+        use x86_64::VirtAddr;
+        
         assert!(memory_size.is_power_of_two(), "Memory size must be a power of two");
         assert!(state_size.is_power_of_two(), "State size must be a power of two");
+        
+        // MPK requires page-level granularity, so we must page-align our allocations
+        let mem_layout = Layout::from_size_align(memory_size.max(4096), 4096).unwrap();
+        let state_layout = Layout::from_size_align((state_size * 8).max(4096), 4096).unwrap();
+        
+        let memory_ptr = unsafe { alloc_zeroed(mem_layout) };
+        let state_ptr = unsafe { alloc_zeroed(state_layout) as *mut u64 };
+
+        // Tag the pages with the MPK key
+        crate::mpk::tag_page(VirtAddr::new(memory_ptr as u64), mpk_key, hhdm_offset);
+        crate::mpk::tag_page(VirtAddr::new(state_ptr as u64), mpk_key, hhdm_offset);
 
         Self {
-            memory_buf: alloc::vec![0u8; memory_size],
-            state_buf: alloc::vec![0u64; state_size],
+            memory_ptr,
+            memory_size,
+            state_ptr,
+            state_size,
             jit,
             vm: AshVm::new(),
+            mpk_key,
         }
     }
 
@@ -640,30 +660,81 @@ impl AshProcess {
     /// Instantly duplicates the sandbox process. 
     /// - JIT Code is shared automatically (Arc/RX Page).
     /// - Data and State are deep-copied via memcpy (faster than CR3 CoW faults for small sandboxes).
-    pub fn ufork(&self) -> Self {
+    pub fn ufork(&self, new_mpk_key: u8, hhdm_offset: u64) -> Self {
+        use alloc::alloc::{alloc_zeroed, Layout};
+        use x86_64::VirtAddr;
+
+        let mem_layout = Layout::from_size_align(self.memory_size.max(4096), 4096).unwrap();
+        let state_layout = Layout::from_size_align((self.state_size * 8).max(4096), 4096).unwrap();
+        
+        let memory_ptr = unsafe { alloc_zeroed(mem_layout) };
+        let state_ptr = unsafe { alloc_zeroed(state_layout) as *mut u64 };
+        
+        unsafe {
+            core::ptr::copy_nonoverlapping(self.memory_ptr, memory_ptr, self.memory_size);
+            core::ptr::copy_nonoverlapping(self.state_ptr, state_ptr, self.state_size);
+        }
+
+        crate::mpk::tag_page(VirtAddr::new(memory_ptr as u64), new_mpk_key, hhdm_offset);
+        crate::mpk::tag_page(VirtAddr::new(state_ptr as u64), new_mpk_key, hhdm_offset);
+
         Self {
-            memory_buf: self.memory_buf.clone(),
-            state_buf: self.state_buf.clone(),
+            memory_ptr,
+            memory_size: self.memory_size,
+            state_ptr,
+            state_size: self.state_size,
             jit: Arc::clone(&self.jit),
             vm: self.vm.clone(),
+            mpk_key: new_mpk_key,
         }
     }
 
     pub fn memory_mut(&mut self) -> &mut [u8] {
-        &mut self.memory_buf
+        unsafe { core::slice::from_raw_parts_mut(self.memory_ptr, self.memory_size) }
     }
 
     pub fn state(&self) -> &[u64] {
-        &self.state_buf
+        unsafe { core::slice::from_raw_parts(self.state_ptr, self.state_size) }
     }
 
     pub fn execute(&mut self) -> u64 {
         let mut ctx = unsafe {
             AshContext {
-                memory: CheriCap::new_root(self.memory_buf.as_mut_ptr(), self.memory_buf.len(), Perms::RW),
-                state: CheriCap::new_root(self.state_buf.as_mut_ptr(), self.state_buf.len(), Perms::RW),
+                memory: CheriCap::new_root(self.memory_ptr, self.memory_size, Perms::RW),
+                state: CheriCap::new_root(self.state_ptr, self.state_size, Perms::RW),
             }
         };
-        unsafe { self.jit.execute(&mut ctx) }
+        
+        // MPK Isolation: Unlock the specific key for this sandbox before execution
+        // Assume PKRS = 0 by default. We might want to lock ALL keys except 0 and this key, 
+        // but for now, we just ensure this key is unlocked. 
+        // If we want true isolation, we set PKRS such that ONLY Key 0 (Kernel) and our Key are accessible.
+        // Actually, we can lock ALL keys except 0 and this key.
+        let mut pkrs = 0xFFFFFFFF; // Lock all 16 keys (AD=1, WD=1)
+        pkrs = crate::mpk::set_key_rights(pkrs, 0, false, false); // Unlock Key 0 (Kernel)
+        pkrs = crate::mpk::set_key_rights(pkrs, self.mpk_key, false, false); // Unlock this SIP's Key
+        
+        crate::mpk::write_pkrs(pkrs);
+        
+        let result = unsafe { self.jit.execute(&mut ctx) };
+        
+        // Re-lock all keys except Key 0
+        let mut pkrs_restore = 0xFFFFFFFF;
+        pkrs_restore = crate::mpk::set_key_rights(pkrs_restore, 0, false, false);
+        crate::mpk::write_pkrs(pkrs_restore);
+        
+        result
+    }
+}
+
+impl Drop for AshProcess {
+    fn drop(&mut self) {
+        use alloc::alloc::{dealloc, Layout};
+        let mem_layout = Layout::from_size_align(self.memory_size.max(4096), 4096).unwrap();
+        let state_layout = Layout::from_size_align((self.state_size * 8).max(4096), 4096).unwrap();
+        unsafe {
+            dealloc(self.memory_ptr, mem_layout);
+            dealloc(self.state_ptr as *mut u8, state_layout);
+        }
     }
 }

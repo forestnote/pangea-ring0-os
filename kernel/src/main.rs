@@ -23,6 +23,7 @@ pub mod sip;
 
 // --- ハードウェア分離・保護モジュール ---
 pub mod cpu;
+pub mod mpk;
 
 // --- POSIX システムコール互換レイヤー ---
 pub mod syscall;
@@ -200,7 +201,8 @@ pub extern "C" fn _start() -> ! {
 
             // ★ Phase 5: ハードウェア支援の隔離・保護（SMEP/SMAP/PKU）を有効化
             cpu::init_features();
-            println!("[+] Hardware Protection (SMEP/SMAP/PKU) Enabled.");
+            mpk::enable_pks();
+            println!("[+] Hardware Protection (SMEP/SMAP/PKU/PKS) Enabled.");
             
             // ★ Phase 5: POSIXシステムコール・エミュレーション初期化
             syscall::init();
@@ -293,9 +295,11 @@ pub extern "C" fn _start() -> ! {
 
             // Arc で JIT コードを共有可能な状態にする
             let jit_arc = Arc::new(jit);
+            
+            let hhdm_offset = HHDM_REQUEST.response().unwrap().offset;
 
-            // オリジナルのプロセス (Parent SIP) を構築
-            let mut parent_process = AshProcess::new(64, 8, Arc::clone(&jit_arc));
+            // オリジナルのプロセス (Parent SIP) を構築 (MPK Key 1)
+            let mut parent_process = AshProcess::new(4096, 4096, Arc::clone(&jit_arc), 1, hhdm_offset);
             
             // パケットデータをセット
             let memory = parent_process.memory_mut();
@@ -317,8 +321,8 @@ pub extern "C" fn _start() -> ! {
             // === ここから µFork の実証 ===
             println!("\n[ µFork ] Initiating Zero-Cost Process Clone...");
             serial_println!("\n[ µFork ] Initiating Zero-Cost Process Clone...");
-            
-            let mut child_process = parent_process.ufork();
+            // 子プロセスには MPK Key 2 を割り当てて分離
+            let mut child_process = parent_process.ufork(2, hhdm_offset);
 
             println!("[ µFork ] Clone complete. Mutating Child's Memory Space...");
             serial_println!("[ µFork ] Clone complete. Mutating Child's Memory Space...");
