@@ -192,8 +192,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.2-3 に更新
-            println!("PangeaOS v0.0.2-3: µFork Zero-Cost Process Cloning.");
+            // ★ バージョンとブートシグネチャを v0.0.2-4 に更新
+            println!("PangeaOS v0.0.2-4: Ring 0 POSIX Syscall Emulation.");
 
             gdt::init();
             interrupts::init_idt();
