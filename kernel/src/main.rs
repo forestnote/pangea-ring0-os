@@ -201,8 +201,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.4-3 に更新
-            println!("PangeaOS v0.0.4-3: SLS Capability Control (CHERI-like).");
+            // ★ バージョンとブートシグネチャを v0.0.4-4 に更新
+            println!("PangeaOS v0.0.4-4: Lock-Free Anti-Exhaustion DoS Defense.");
 
             gdt::init();
             interrupts::init_idt();
@@ -248,7 +248,7 @@ pub extern "C" fn _start() -> ! {
 
                 sls::initialize();
                 let oid = sls::ObjectId(0x9999);
-                let demo_ptr = sls::create_object(oid, 4096);
+                let demo_ptr = sls::create_object(oid, 4096, 0).expect("Failed to create demo object");
                 let cap_token = sls::generate_capability(oid);
                 
                 println!("[ SLS ] Object {:#x} Capability Token: {:#x}", oid.0, cap_token);
