@@ -6,6 +6,7 @@ const APIC_LVT_TIMER: u64 = 0x320;
 const APIC_TIMER_INIT: u64 = 0x380;
 // const APIC_TIMER_CURR: u64 = 0x390;
 const APIC_TIMER_DIV: u64 = 0x3E0;
+const APIC_ID: u64 = 0x20;
 
 use x86_64::structures::paging::{Page, PhysFrame, Mapper, Size4KiB, PageTableFlags, FrameAllocator};
 use x86_64::{VirtAddr, PhysAddr};
@@ -91,4 +92,8 @@ pub fn read_reg(offset: u64) -> u32 {
         let ptr = (APIC_BASE_VIRT + offset) as *const u32;
         core::ptr::read_volatile(ptr)
     }
+}
+
+pub fn lapic_id() -> u8 {
+    (read_reg(APIC_ID) >> 24) as u8
 }

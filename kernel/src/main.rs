@@ -12,6 +12,7 @@ mod pmm;
 mod memory;
 mod allocator;
 pub mod serial;
+pub mod scheduler;
 
 // --- 復元したハードウェア制御モジュール ---
 pub mod apic;
@@ -36,8 +37,7 @@ use sip::ash::{AshContext, Instruction, Reg, AshJit};
 // ★ 仮想メモリマッパー(VMM)をグローバルに公開し、W^X防壁を操作可能にする
 use spin::Mutex;
 use x86_64::structures::paging::OffsetPageTable;
-pub static VMM: Mutex<Option<OffsetPageTable<'static>>> = Mutex::new(None);
-
+pub static CORE_VMMS: [Mutex<Option<OffsetPageTable<'static>>>; 256] = [const { Mutex::new(None) }; 256];
 #[used]
 #[link_section = ".requests"]
 static BASE_REVISION: BaseRevision = BaseRevision::new();
@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-6 に更新
-            println!("PangeaOS v0.0.1-6: W^X Enforced Ring 0 JIT Compiler.");
+            // ★ バージョンとブートシグネチャを v0.0.1-6-1 に更新
+            println!("PangeaOS v0.0.1-6-1: W^X Enforced Ring 0 JIT Compiler.");
 
             gdt::init();
             interrupts::init_idt();
@@ -210,11 +210,16 @@ pub extern "C" fn _start() -> ! {
                 let mut allocator_guard = pmm::PMM.lock();
                 let pmm_allocator = allocator_guard.as_mut().unwrap();
                 allocator::init_heap(&mut mapper, pmm_allocator).expect("Heap initialization failed!");
+
+                // Initialize APIC for BSP
+                apic::init(hhdm_offset, &mut mapper, pmm_allocator);
+
                 drop(allocator_guard);
 
                 println!("[ OK ] Global Heap Mapped. Allocator Ready.");
 
-                *VMM.lock() = Some(mapper);
+                let bsp_lapic_id = apic::lapic_id();
+                *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);
 
             } else {
                 panic!("Failed to get Memory Map or HHDM offset.");
@@ -231,14 +236,21 @@ pub extern "C" fn _start() -> ! {
             ctx.data[1] = 10;
 
             let bytecode = [
-                Instruction::LoadContext(Reg::R1, 0),
-                Instruction::LoadContext(Reg::R2, 1),
-                Instruction::Add(Reg::R1, Reg::R2),
-                Instruction::LoadImm(Reg::R3, 100),
-                Instruction::Add(Reg::R1, Reg::R3),
-                Instruction::LoadContext(Reg::R5, 9999),
-                Instruction::Add(Reg::R1, Reg::R5),
-                Instruction::Add(Reg::R0, Reg::R1),
+                Instruction::LoadContext(Reg::R1, 0), // R1 = 42 (0b101010)
+                Instruction::LoadContext(Reg::R2, 1), // R2 = 10 (0b001010)
+                
+                Instruction::And(Reg::R1, Reg::R2), // R1 = 42 & 10 = 10
+                Instruction::LoadImm(Reg::R3, 10),  // R3 = 10
+                
+                Instruction::JeqFwd(Reg::R1, Reg::R3, 2), // Jump over next 2 instructions if R1 == R3
+                
+                Instruction::LoadImm(Reg::R0, 999), // Should be skipped
+                Instruction::LoadImm(Reg::R0, 888), // Should be skipped
+                
+                Instruction::LoadImm(Reg::R4, 100), // Target of jump. R4 = 100
+                Instruction::Or(Reg::R0, Reg::R4),  // R0 = 0 | 100 = 100
+                Instruction::Xor(Reg::R0, Reg::R3), // R0 = 100 ^ 10 = 110
+                
                 Instruction::Exit,
             ];
 
@@ -261,21 +273,53 @@ pub extern "C" fn _start() -> ! {
             serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
 
             // ==========================================
-            // ★ Phase 4: SIPと非同期エグゼキュータの起動
+            // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)
             // ==========================================
-            println!("\n[ TARGET ACQUIRED ] Igniting Zero-Cost Concurrency Engine...");
+            println!("\n[ TARGET ACQUIRED ] Igniting Fully Preemptive Zero-Cost Concurrency Engine...");
+
+            let (tx, rx) = ipc::channel::<String>();
+            *ALPHA_TX.lock() = Some(tx);
+            *BETA_RX.lock() = Some(rx);
+
+            let thread_alpha = scheduler::Thread::new(1, alpha_thread_entry);
+            let thread_beta = scheduler::Thread::new(2, beta_thread_entry);
+            let thread_idle = scheduler::Thread::new(0, idle_thread_entry);
+
+            {
+                let mut sched = scheduler::SCHEDULER.lock();
+                sched.spawn(thread_idle);
+                sched.spawn(thread_alpha);
+                sched.spawn(thread_beta);
+            }
 
             unsafe { core::arch::asm!("sti") };
 
-            let mut executor = SimpleExecutor::new();
-            let (tx, rx) = ipc::channel::<String>();
-
-            executor.spawn(Task::new(Sip::spawn(|env| sip_alpha_main(env, tx))));
-            executor.spawn(Task::new(Sip::spawn(|env| sip_beta_main(env, rx))));
-
-            executor.run();
+            loop { unsafe { core::arch::asm!("hlt") }; }
         }
     }
 
     loop { unsafe { core::arch::asm!("cli; hlt") }; }
+}
+
+pub static ALPHA_TX: Mutex<Option<Sender<String>>> = Mutex::new(None);
+pub static BETA_RX: Mutex<Option<Receiver<String>>> = Mutex::new(None);
+
+pub extern "C" fn alpha_thread_entry() {
+    let tx = ALPHA_TX.lock().take().unwrap();
+    let mut executor = SimpleExecutor::new();
+    executor.spawn(Task::new(Sip::spawn(|env| sip_alpha_main(env, tx))));
+    executor.run();
+    loop { unsafe { core::arch::asm!("hlt") } }
+}
+
+pub extern "C" fn beta_thread_entry() {
+    let rx = BETA_RX.lock().take().unwrap();
+    let mut executor = SimpleExecutor::new();
+    executor.spawn(Task::new(Sip::spawn(|env| sip_beta_main(env, rx))));
+    executor.run();
+    loop { unsafe { core::arch::asm!("hlt") } }
+}
+
+pub extern "C" fn idle_thread_entry() {
+    loop { unsafe { core::arch::asm!("hlt") } }
 }

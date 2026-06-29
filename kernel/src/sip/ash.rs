@@ -12,6 +12,10 @@ pub enum Instruction {
     LoadImm(Reg, u64),
     Add(Reg, Reg),
     Sub(Reg, Reg),
+    And(Reg, Reg),
+    Or(Reg, Reg),
+    Xor(Reg, Reg),
+    JeqFwd(Reg, Reg, u8),
     LoadContext(Reg, usize),
     Exit,
 }
@@ -25,11 +29,22 @@ impl AshVm {
 
     pub fn execute(&mut self, instructions: &[Instruction], context: &AshContext) -> u64 {
         self.registers.fill(0);
-        for &instr in instructions {
+        let mut pc = 0;
+        while pc < instructions.len() {
+            let instr = instructions[pc];
+            pc += 1;
             match instr {
                 Instruction::LoadImm(reg, val) => self.registers[reg as usize] = val,
                 Instruction::Add(dst, src) => self.registers[dst as usize] = self.registers[dst as usize].wrapping_add(self.registers[src as usize]),
                 Instruction::Sub(dst, src) => self.registers[dst as usize] = self.registers[dst as usize].wrapping_sub(self.registers[src as usize]),
+                Instruction::And(dst, src) => self.registers[dst as usize] &= self.registers[src as usize],
+                Instruction::Or(dst, src) => self.registers[dst as usize] |= self.registers[src as usize],
+                Instruction::Xor(dst, src) => self.registers[dst as usize] ^= self.registers[src as usize],
+                Instruction::JeqFwd(dst, src, offset) => {
+                    if self.registers[dst as usize] == self.registers[src as usize] {
+                        pc += offset as usize;
+                    }
+                }
                 Instruction::LoadContext(dst, offset) => {
                     if offset < context.data.len() {
                         self.registers[dst as usize] = context.data[offset] as u64;
@@ -80,7 +95,11 @@ impl AshJit {
         code.extend_from_slice(&[0x31, 0xf6]); // xor esi, esi
 
         // Body
-        for &instr in instructions {
+        let mut instr_offsets = Vec::with_capacity(instructions.len() + 1);
+        let mut backpatch_list = Vec::new();
+
+        for (i, &instr) in instructions.iter().enumerate() {
+            instr_offsets.push(code.len());
             match instr {
                 Instruction::LoadImm(reg, val) => {
                     let dst = Self::reg_to_x86(reg);
@@ -93,6 +112,28 @@ impl AshJit {
                 Instruction::Sub(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
                     code.push(0x48); code.push(0x29); code.push(0xc0 | (s << 3) | d);
+                }
+                Instruction::And(dst, src) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    code.push(0x48); code.push(0x21); code.push(0xc0 | (s << 3) | d);
+                }
+                Instruction::Or(dst, src) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    code.push(0x48); code.push(0x09); code.push(0xc0 | (s << 3) | d);
+                }
+                Instruction::Xor(dst, src) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    code.push(0x48); code.push(0x31); code.push(0xc0 | (s << 3) | d);
+                }
+                Instruction::JeqFwd(dst, src, offset) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    // cmp dst, src
+                    code.push(0x48); code.push(0x39); code.push(0xc0 | (s << 3) | d);
+                    // je rel32
+                    code.push(0x0f); code.push(0x84);
+                    let patch_offset = code.len();
+                    code.extend_from_slice(&[0, 0, 0, 0]); // dummy offset
+                    backpatch_list.push((patch_offset, i + 1 + offset as usize));
                 }
                 Instruction::LoadContext(dst, offset) => {
                     let d = Self::reg_to_x86(dst);
@@ -109,6 +150,24 @@ impl AshJit {
                 }
             }
         }
+        instr_offsets.push(code.len());
+
+        // Backpatching forward jumps
+        for (patch_offset, target_idx) in backpatch_list {
+            let safe_target = if target_idx >= instructions.len() {
+                instructions.len() - 1 // Fallback to last instruction (should be Exit)
+            } else {
+                target_idx
+            };
+            let target_byte_offset = instr_offsets[safe_target];
+            let jump_end = patch_offset + 4;
+            let rel32 = (target_byte_offset as isize - jump_end as isize) as i32;
+            let bytes = rel32.to_le_bytes();
+            code[patch_offset] = bytes[0];
+            code[patch_offset+1] = bytes[1];
+            code[patch_offset+2] = bytes[2];
+            code[patch_offset+3] = bytes[3];
+        }
 
         // バイトコードを一時領域から専用の4KBページバッファへ物理コピーする
         unsafe { ptr::copy_nonoverlapping(code.as_ptr(), self.buffer, code.len()); }
@@ -117,7 +176,7 @@ impl AshJit {
 
     /// W^X Enforcer: マシン語書き込み完了後、ページを「実行可能・書き込み不可 (RX)」へフリップする
     pub fn seal(&self) {
-        let mut vmm_guard = crate::VMM.lock();
+        let mut vmm_guard = crate::CORE_VMMS[crate::apic::lapic_id() as usize].lock();
         let mapper = vmm_guard.as_mut().expect("VMM not initialized");
         let page = Page::<Size4KiB>::containing_address(VirtAddr::new(self.buffer as u64));
 
@@ -142,7 +201,7 @@ impl Drop for AshJit {
         // この処理を怠ると、Read-Only(RX)になったページがグローバルアロケータに返却される。
         // その後、別のプロセスがこのページを再利用してデータ(RW)を書き込もうとした瞬間、
         // ページフォルトが炸裂してOSが即死する。確実に「RW+NX」へリストアしなければならない。
-        let mut vmm_guard = crate::VMM.lock();
+        let mut vmm_guard = crate::CORE_VMMS[crate::apic::lapic_id() as usize].lock();
         if let Some(mapper) = vmm_guard.as_mut() {
             let page = Page::<Size4KiB>::containing_address(VirtAddr::new(self.buffer as u64));
             let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_EXECUTE;

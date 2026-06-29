@@ -39,7 +39,10 @@ lazy_static! {
             .set_stack_index(gdt::DOUBLE_FAULT_IST_INDEX);
         }
 
-        idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
+        unsafe {
+            idt[InterruptIndex::Timer.as_usize()]
+                .set_handler_addr(x86_64::VirtAddr::new(timer_interrupt_handler_naked as *const () as u64));
+        }
 
         idt
     };
@@ -61,11 +64,63 @@ pub fn disable_pic() {
     serial_println!("[ OK ] 8259 PIC Disabled (All Masked).");
 }
 
-extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    crate::task::timer::tick();
-    crate::apic::eoi();
+#[unsafe(naked)]
+pub extern "C" fn timer_interrupt_handler_naked() {
+    core::arch::naked_asm!(
+        "push rax",
+        "push rcx",
+        "push rdx",
+        "push rbx",
+        "push rbp",
+        "push rsi",
+        "push rdi",
+        "push r8",
+        "push r9",
+        "push r10",
+        "push r11",
+        "push r12",
+        "push r13",
+        "push r14",
+        "push r15",
+
+        "mov rdi, rsp",
+        "and rsp, 0xFFFFFFFFFFFFFFF0", // Align stack for C ABI
+        "call preempt_schedule",
+
+        "mov r12, rax", // Save new_rsp across the next call
+        "call apic_eoi_c",
+
+        "mov rsp, r12", // Stack swap!
+
+        "pop r15",
+        "pop r14",
+        "pop r13",
+        "pop r12",
+        "pop r11",
+        "pop r10",
+        "pop r9",
+        "pop r8",
+        "pop rdi",
+        "pop rsi",
+        "pop rbp",
+        "pop rbx",
+        "pop rdx",
+        "pop rcx",
+        "pop rax",
+        "iretq",
+    );
 }
 
+#[no_mangle]
+pub extern "C" fn preempt_schedule(old_rsp: u64) -> u64 {
+    crate::task::timer::tick();
+    crate::scheduler::SCHEDULER.lock().next_task_rsp(old_rsp)
+}
+
+#[no_mangle]
+pub extern "C" fn apic_eoi_c() {
+    crate::apic::eoi();
+}
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     println!("\n[ WARNING ] EXCEPTION: BREAKPOINT");
     serial_println!("\n[ WARNING ] EXCEPTION: BREAKPOINT\n{:#?}", stack_frame);

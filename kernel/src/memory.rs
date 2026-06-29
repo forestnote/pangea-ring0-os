@@ -36,3 +36,34 @@ pub fn create_mesh_mapping(
         }
     }
 }
+
+#[allow(dead_code)]
+pub unsafe fn create_per_core_page_table(
+    physical_memory_offset: VirtAddr,
+    frame_allocator: &mut impl FrameAllocator<Size4KiB>
+) -> Option<PhysFrame> {
+    let new_pml4_frame = frame_allocator.allocate_frame()?;
+    let new_pml4_addr = physical_memory_offset + new_pml4_frame.start_address().as_u64();
+    let new_pml4: &mut PageTable = &mut *new_pml4_addr.as_mut_ptr();
+
+    new_pml4.zero();
+
+    let active_pml4 = active_level_4_table(physical_memory_offset);
+
+    // Higher half is 256..512 in x86_64
+    for i in 256..512 {
+        new_pml4[i] = active_pml4[i].clone();
+    }
+
+    Some(new_pml4_frame)
+}
+
+#[allow(dead_code)]
+pub unsafe fn init_mapper_from_frame(
+    pml4_frame: PhysFrame,
+    physical_memory_offset: VirtAddr
+) -> OffsetPageTable<'static> {
+    let pml4_addr = physical_memory_offset + pml4_frame.start_address().as_u64();
+    let pml4: &mut PageTable = &mut *pml4_addr.as_mut_ptr();
+    OffsetPageTable::new(pml4, physical_memory_offset)
+}
