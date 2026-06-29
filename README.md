@@ -123,6 +123,6 @@ Phase 6: VFSの完全廃止と「データ管理の特異点」
 
 📜 ライセンス (License)
 
-This project is licensed under the MIT License - see the LICENSE file for details.[cite: 1]
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-Copyright (c) 2026 pangea-ring0-os developers.[cite: 1]
+Copyright (c) 2026 [pangea-ring0-os developers](https://argleton-ghoti.com/).
