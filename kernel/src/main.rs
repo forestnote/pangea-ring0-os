@@ -24,6 +24,7 @@ pub mod sip;
 // --- ハードウェア分離・保護モジュール ---
 pub mod cpu;
 pub mod mpk;
+pub mod cet;
 pub mod smp;
 
 // --- POSIX システムコール互換レイヤー ---
@@ -207,6 +208,7 @@ pub extern "C" fn _start() -> ! {
             // ★ Phase 5: ハードウェア支援の隔離・保護（SMEP/SMAP/PKU）を有効化
             cpu::init_features();
             mpk::enable_pks();
+            cet::initialize();
             println!("[+] Hardware Protection (SMEP/SMAP/PKU/PKS) Enabled.");
             
             // ★ Phase 5: POSIXシステムコール・エミュレーション初期化

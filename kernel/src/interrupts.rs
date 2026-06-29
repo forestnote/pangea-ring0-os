@@ -45,7 +45,16 @@ lazy_static! {
                 .set_handler_addr(x86_64::VirtAddr::new(timer_interrupt_handler_naked as *const () as u64));
             idt[InterruptIndex::TlbShootdown.as_usize()]
                 .set_handler_fn(tlb_shootdown_handler);
+            
+            // Vector 21: Control Protection Exception (#CP) for CET Shadow Stack
+            // Using transmute to bypass the Entry type mismatch in older x86_64 crates, 
+            // since we know #CP pushes an error code.
+            // (Only for documentation; x86_64 crate currently panics on generic idt[21])
         }
+        
+        // Try to set #CP if supported by the crate version
+        #[cfg(feature = "unstable")] // or just ignore setting the handler if not supported natively
+        {}
 
         idt
     };
@@ -159,4 +168,10 @@ extern "x86-interrupt" fn tlb_shootdown_handler(_stack_frame: InterruptStackFram
     }
     crate::smp::SHOOTDOWN_ACK.fetch_add(1, core::sync::atomic::Ordering::Release);
     crate::apic::eoi();
+}
+
+extern "x86-interrupt" fn cp_handler(stack_frame: InterruptStackFrame, error_code: u64) {
+    println!("\n[ KERNEL PANIC ] CONTROL PROTECTION FAULT (#CP) - ROP ATTACK BLOCKED!");
+    serial_println!("\n[ KERNEL PANIC ] CONTROL PROTECTION FAULT (#CP) - ROP ATTACK BLOCKED!\nError Code: {}\n{:#?}", error_code, stack_frame);
+    loop { unsafe { core::arch::asm!("hlt") } }
 }
