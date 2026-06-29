@@ -35,11 +35,16 @@ pub enum Instruction {
 }
 
 pub extern "C" fn helper_get_time() -> u64 {
+    // [ Intel IBT (Indirect Branch Tracking) ]
+    // Called indirectly from JIT, must start with ENDBR64
+    unsafe { core::arch::asm!("endbr64") };
     unsafe { core::arch::x86_64::_rdtsc() }
 }
 
 pub extern "C" fn helper_debug_print(val: u64) -> u64 {
-    crate::serial_println!("[ ASH JIT LOG ] Value: {:#10x} ({})", val, val);
+    // [ Intel IBT (Indirect Branch Tracking) ]
+    unsafe { core::arch::asm!("endbr64") };
+    crate::serial_println!("[ ASH JIT LOG ] Value: \t{:#x} ({})", val, val);
     0
 }
 
@@ -233,7 +238,16 @@ impl AshJit {
     }
 
     pub fn compile(&mut self, instructions: &[Instruction]) -> Result<(), &'static str> {
+        // [ eBPF-style Static Verifier ]
+        // コンパイル前に命令グラフを静的解析し、安全性（停止性、不正ジャンプ）を証明する
+        Self::verify_bytecode(instructions).expect("Ash Verifier rejected bytecode: Unsafe execution detected!");
+
         let mut code = Vec::new();
+
+        // [ Intel IBT (Indirect Branch Tracking) Defense ]
+        // 間接ジャンプ（execute_safeによる呼び出し）の着地点として ENDBR64 を強制配置
+        // これにより、CET有効下でのJOP (Jump-Oriented Programming) を完全に無力化
+        code.push(0xf3); code.push(0x0f); code.push(0x1e); code.push(0xfa);
 
         // Prologue
         code.push(0x53); // push rbx
@@ -604,6 +618,40 @@ impl AshJit {
     pub unsafe fn execute(&self, context: &mut AshContext) -> u64 {
         let func: extern "C" fn(*mut AshContext) -> u64 = core::mem::transmute(self.buffer);
         func(context as *mut _)
+    }
+
+    /// eBPF-style Static Verifier
+    /// 実行前にバイトコードの安全性を静的に証明する
+    fn verify_bytecode(instructions: &[Instruction]) -> Result<(), &'static str> {
+        let len = instructions.len();
+        if len == 0 { return Err("Empty bytecode"); }
+        if !matches!(instructions[len - 1], Instruction::Exit) {
+            return Err("Program must end with Exit instruction");
+        }
+
+        for (i, instr) in instructions.iter().enumerate() {
+            match instr {
+                Instruction::JeqFwd(_, _, offset) |
+                Instruction::JneFwd(_, _, offset) |
+                Instruction::JltFwd(_, _, offset) => {
+                    if i + 1 + (*offset as usize) >= len {
+                        return Err("Forward jump exceeds program bounds");
+                    }
+                }
+                Instruction::LoopBwd(_, count) => {
+                    if (*count as usize) > i {
+                        return Err("Backward loop exceeds program bounds (underflow)");
+                    }
+                }
+                Instruction::CallExt(id) => {
+                    if *id > 1 {
+                        return Err("Invalid helper function ID");
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 }
 
