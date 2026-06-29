@@ -51,10 +51,6 @@ lazy_static! {
             // since we know #CP pushes an error code.
             // (Only for documentation; x86_64 crate currently panics on generic idt[21])
         }
-        
-        // Try to set #CP if supported by the crate version
-        #[cfg(feature = "unstable")] // or just ignore setting the handler if not supported natively
-        {}
 
         idt
     };
@@ -170,6 +166,7 @@ extern "x86-interrupt" fn tlb_shootdown_handler(_stack_frame: InterruptStackFram
     crate::apic::eoi();
 }
 
+#[allow(dead_code)]
 extern "x86-interrupt" fn cp_handler(stack_frame: InterruptStackFrame, error_code: u64) {
     println!("\n[ KERNEL PANIC ] CONTROL PROTECTION FAULT (#CP) - ROP ATTACK BLOCKED!");
     serial_println!("\n[ KERNEL PANIC ] CONTROL PROTECTION FAULT (#CP) - ROP ATTACK BLOCKED!\nError Code: {}\n{:#?}", error_code, stack_frame);
