@@ -176,7 +176,7 @@ impl AshJit {
         match reg { Reg::R0=>0, Reg::R1=>1, Reg::R2=>2, Reg::R3=>3, Reg::R4=>5, Reg::R5=>6 }
     }
 
-    pub fn compile(&mut self, instructions: &[Instruction]) {
+    pub fn compile(&mut self, instructions: &[Instruction]) -> Result<(), &'static str> {
         let mut code = Vec::new();
 
         // Prologue
@@ -188,6 +188,10 @@ impl AshJit {
         code.extend_from_slice(&[0x31, 0xdb]); // xor ebx, ebx
         code.extend_from_slice(&[0x31, 0xed]); // xor ebp, ebp
         code.extend_from_slice(&[0x31, 0xf6]); // xor esi, esi
+        
+        // Initialize Gas Counter (r9 = 10000)
+        code.push(0x49); code.push(0xc7); code.push(0xc1); 
+        code.extend_from_slice(&10000u32.to_le_bytes());
 
         // Body
         let mut instr_offsets = Vec::with_capacity(instructions.len() + 1);
@@ -275,21 +279,25 @@ impl AshJit {
                 }
                 Instruction::LoadDyn(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
-                    // and src, 63 (Zero-cost branchless bounds check)
-                    code.push(0x48); code.push(0x83); code.push(0xe0 | s); code.push(0x3F);
-                    // movzx dst, byte ptr [rdi + src]
-                    code.push(0x48); code.push(0x0f); code.push(0xb6);
+                    // mov r8, src (Use r8 as scratch register to prevent mutating src)
+                    code.push(0x49); code.push(0x89); code.push(0xc0 | s);
+                    // and r8, 63 (Zero-cost branchless bounds check)
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x3F);
+                    // movzx dst, byte ptr [rdi + r8]
+                    code.push(0x4a); code.push(0x0f); code.push(0xb6);
                     code.push(0x04 | (d << 3));
-                    code.push((s << 3) | 7);
+                    code.push(0x07);
                 }
                 Instruction::StoreDyn(data_reg, off_reg) => {
                     let data = Self::reg_to_x86(data_reg); let off = Self::reg_to_x86(off_reg);
-                    // and off, 63
-                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x3F);
-                    // mov byte ptr [rdi + off], data
-                    code.push(0x40); code.push(0x88);
+                    // mov r8, off
+                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
+                    // and r8, 63
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x3F);
+                    // mov byte ptr [rdi + r8], data
+                    code.push(0x42); code.push(0x88);
                     code.push(0x04 | (data << 3));
-                    code.push((off << 3) | 7);
+                    code.push(0x07);
                 }
                 Instruction::LoadState(dst, offset) => {
                     let d = Self::reg_to_x86(dst);
@@ -309,32 +317,38 @@ impl AshJit {
                 }
                 Instruction::LoadStateDyn(dst, off_reg) => {
                     let d = Self::reg_to_x86(dst); let off = Self::reg_to_x86(off_reg);
-                    // and off_reg, 7
-                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x07);
-                    // mov dst, qword ptr [rdi + off_reg * 8 + 64]
-                    code.push(0x48); code.push(0x8b);
-                    code.push(0x40 | (d << 3) | 0x04); // mod=01, reg=d, rm=100
-                    code.push(0xc0 | (off << 3) | 0x07); // SIB: scale=8, index=off, base=rdi
+                    // mov r8, off
+                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
+                    // and r8, 7
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07);
+                    // mov dst, qword ptr [rdi + r8 * 8 + 64]
+                    code.push(0x4a); code.push(0x8b);
+                    code.push(0x40 | (d << 3) | 0x04);
+                    code.push(0xc7);
                     code.push(64); // disp8 = 64
                 }
                 Instruction::StoreStateDyn(data_reg, off_reg) => {
                     let data = Self::reg_to_x86(data_reg); let off = Self::reg_to_x86(off_reg);
-                    // and off_reg, 7
-                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x07);
-                    // mov qword ptr [rdi + off_reg * 8 + 64], data
-                    code.push(0x48); code.push(0x89);
-                    code.push(0x40 | (data << 3) | 0x04); // mod=01, reg=data, rm=100
-                    code.push(0xc0 | (off << 3) | 0x07); // SIB: scale=8, index=off, base=rdi
+                    // mov r8, off
+                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
+                    // and r8, 7
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07);
+                    // mov qword ptr [rdi + r8 * 8 + 64], data
+                    code.push(0x4a); code.push(0x89);
+                    code.push(0x40 | (data << 3) | 0x04);
+                    code.push(0xc7);
                     code.push(64); // disp8 = 64
                 }
                 Instruction::LoadNet32(dst, off_reg) => {
                     let d = Self::reg_to_x86(dst); let off = Self::reg_to_x86(off_reg);
-                    // and off_reg, 60 (0x3C)
-                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x3C);
-                    // mov r32, dword ptr [rdi + off_reg]
-                    code.push(0x8b);
-                    code.push(0x04 | (d << 3)); // mod=00, reg=d, rm=100
-                    code.push((off << 3) | 7); // SIB: scale=1, index=off, base=rdi
+                    // mov r8, off
+                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
+                    // and r8, 60
+                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x3C);
+                    // mov r32, dword ptr [rdi + r8]
+                    code.push(0x42); code.push(0x8b);
+                    code.push(0x04 | (d << 3));
+                    code.push(0x07);
                     // bswap r32
                     code.push(0x0f); code.push(0xc8 | d);
                 }
@@ -342,12 +356,26 @@ impl AshJit {
                     let target_idx = i.saturating_sub(count as usize);
                     let target_offset = instr_offsets[target_idx];
                     let reg = Self::reg_to_x86(r);
+                    
+                    // GAS CHECK: dec r9
+                    code.push(0x49); code.push(0xff); code.push(0xc9);
+                    // jnz GAS_OK (skip next 5 bytes)
+                    code.push(0x75); code.push(0x05);
+                    // GAS_DEPLETED: return 0 early (xor eax, eax; pop rbp; pop rbx; ret)
+                    code.push(0x31); code.push(0xc0);
+                    code.push(0x5d);
+                    code.push(0x5b);
+                    code.push(0xc3);
+                    // GAS_OK:
+                    
                     // dec reg (64-bit)
                     code.push(0x48); code.push(0xFF); code.push(0xC8 | reg);
                     // jnz rel8
                     let current_len_after = code.len() + 2;
                     let rel8 = target_offset as isize - current_len_after as isize;
-                    assert!(rel8 >= -128 && rel8 <= 127, "LoopBwd target too far");
+                    if rel8 < -128 || rel8 > 127 {
+                        return Err("LoopBwd target too far (exceeds 8-bit relative jump limit)");
+                    }
                     code.push(0x75);
                     code.push(rel8 as u8);
                 }
@@ -410,9 +438,14 @@ impl AshJit {
             code[patch_offset+3] = bytes[3];
         }
 
+        if code.len() > 4096 {
+            return Err("JIT payload exceeds 4KB buffer bounds (Buffer Overflow Mitigated)");
+        }
+
         // バイトコードを一時領域から専用の4KBページバッファへ物理コピーする
         unsafe { ptr::copy_nonoverlapping(code.as_ptr(), self.buffer, code.len()); }
         self.len = code.len();
+        Ok(())
     }
 
     /// W^X Enforcer: マシン語書き込み完了後、ページを「実行可能・書き込み不可 (RX)」へフリップする

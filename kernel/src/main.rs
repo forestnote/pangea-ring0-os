@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-7 に更新
-            println!("PangeaOS v0.0.1-7: Ring 0 FFI & Kernel Callbacks.");
+            // ★ バージョンとブートシグネチャを v0.0.1-8 に更新
+            println!("PangeaOS v0.0.1-8: Secure JIT Sandbox (Gas Limits & Bounds Checks).");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,10 +226,10 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (v0.0.1-7: Ring 0 FFI)
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (v0.0.1-8: Secure Sandbox)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (FFI & Callback Mode)...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (FFI & Callback Mode)...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Secure Mode with Gas Limits)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Secure Mode with Gas Limits)...");
 
             let mut ctx = AshContext { data: [0; 64], state: [0; 8] };
             // Mock IPv4 Packet
@@ -273,7 +273,11 @@ pub extern "C" fn _start() -> ! {
             serial_println!("[ ASH JIT ] Compiling Bytecode to Native x86_64...");
 
             let mut jit = AshJit::new();
-            jit.compile(&bytecode);
+            if let Err(e) = jit.compile(&bytecode) {
+                println!("[ ASH JIT FATAL ] Compilation Error: {}", e);
+                serial_println!("[ ASH JIT FATAL ] Compilation Error: {}", e);
+                loop { unsafe { core::arch::asm!("hlt") }; }
+            }
 
             println!("[ ASH JIT ] Sealing Memory Page (W^X Enforcer Active)...");
             serial_println!("[ ASH JIT ] Sealing Memory Page (W^X Enforcer Active)...");
