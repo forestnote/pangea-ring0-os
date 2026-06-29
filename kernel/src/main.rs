@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-6-2 に更新
-            println!("PangeaOS v0.0.1-6-2: Advanced ASH JIT Compiler.");
+            // ★ バージョンとブートシグネチャを v0.0.1-6-3 に更新
+            println!("PangeaOS v0.0.1-6-3: Dynamic W^X Packet Rewriter.");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,45 +226,43 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Advanced Packets)
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Dynamic Packet Rewriter)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Advanced Mode)...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Advanced Mode)...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Rewriter Mode)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Rewriter Mode)...");
 
             let mut ctx = AshContext { data: [0; 64] };
-            // Mock IPv4 Header: Version(4) | IHL(5) = 0x45 in byte 0.
-            // Packet length in bytes 2 and 3: 0x01, 0xBB (443)
+            // Mock IPv4 Header
             ctx.data[0] = 0x45;
             ctx.data[2] = 0x01;
             ctx.data[3] = 0xBB;
+            ctx.data[10] = 0x00; // Checksum placeholder
 
             let bytecode = [
-                // Load byte 0 (Version/IHL)
-                Instruction::LoadContext(Reg::R1, 0),
-                Instruction::LoadImm(Reg::R2, 0x45),
-                // If not IPv4 with IHL=5, skip parsing (offset 10 instructions)
-                Instruction::JneFwd(Reg::R1, Reg::R2, 10),
+                // 1. Static Packet Rewrite: Change Version/IHL from 0x45 to 0x46
+                Instruction::LoadImm(Reg::R1, 0x46),
+                Instruction::StoreContext(Reg::R1, 0),
 
-                // Load Length (Big Endian)
-                Instruction::LoadContext(Reg::R3, 2), // High byte: 0x01
-                Instruction::Shl(Reg::R3, 8),         // R3 = 0x0100
-                Instruction::LoadContext(Reg::R4, 3), // Low byte: 0xBB
-                Instruction::Or(Reg::R3, Reg::R4),    // R3 = 0x01BB (443)
+                // 2. Dynamic Memory Access: Read byte at dynamic offset (from R2)
+                Instruction::LoadImm(Reg::R2, 3), // Offset 3 (holds 0xBB)
+                Instruction::LoadDyn(Reg::R3, Reg::R2), // R3 = data[3] = 0xBB
 
-                // Check if Length < 500
-                Instruction::LoadImm(Reg::R5, 500),
-                Instruction::JltFwd(Reg::R3, Reg::R5, 2), // If < 500, skip next 2 instructions
+                // 3. Bitwise Math: Invert the byte (XOR with 0xFF)
+                Instruction::LoadImm(Reg::R4, 0xFF),
+                Instruction::Xor(Reg::R3, Reg::R4), // R3 = 0xBB ^ 0xFF = 0x44
 
-                // If >= 500
-                Instruction::LoadImm(Reg::R0, 9999), // R0 = 9999 (Reject, too large)
-                Instruction::Exit,
+                // 4. Dynamic Memory Write: Store result to dynamic offset (from R5)
+                Instruction::LoadImm(Reg::R5, 10), // Offset 10
+                Instruction::StoreDyn(Reg::R3, Reg::R5), // data[10] = 0x44
 
-                // If < 500, Valid small packet
-                Instruction::LoadImm(Reg::R0, 1), // R0 = 1 (Accept)
-                Instruction::Exit,
+                // 5. Check Zero-Cost Bounds Checking Security
+                // Try to write to offset 100 (out of bounds). It will be masked to 100 & 63 = 36.
+                Instruction::LoadImm(Reg::R2, 100),
+                Instruction::LoadImm(Reg::R1, 0x99),
+                Instruction::StoreDyn(Reg::R1, Reg::R2), // Safely writes to data[36] instead of crashing OS!
 
-                // Target for JneFwd (Not IPv4)
-                Instruction::LoadImm(Reg::R0, 0), // R0 = 0 (Reject)
+                // Accept packet
+                Instruction::LoadImm(Reg::R0, 1),
                 Instruction::Exit,
             ];
 
@@ -281,10 +279,16 @@ pub extern "C" fn _start() -> ! {
             println!("[ ASH JIT ] Emission Complete. Direct Execution Initiated...");
             serial_println!("[ ASH JIT ] Emission Complete. Direct Execution Initiated...");
 
-            let native_result = unsafe { jit.execute(&ctx) };
+            let native_result = unsafe { jit.execute(&mut ctx) };
 
             println!("        -> [ ASH JIT ] Native Result: {}", native_result);
             serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
+            println!("        -> [ ASH JIT ] Packet Byte 0 (Rewritten): {:#04x}", ctx.data[0]);
+            serial_println!("        -> [ ASH JIT ] Packet Byte 0 (Rewritten): {:#04x}", ctx.data[0]);
+            println!("        -> [ ASH JIT ] Packet Byte 10 (Dynamic XOR): {:#04x}", ctx.data[10]);
+            serial_println!("        -> [ ASH JIT ] Packet Byte 10 (Dynamic XOR): {:#04x}", ctx.data[10]);
+            println!("        -> [ ASH JIT ] Packet Byte 36 (MBC Safe Bounds): {:#04x}", ctx.data[36]);
+            serial_println!("        -> [ ASH JIT ] Packet Byte 36 (MBC Safe Bounds): {:#04x}", ctx.data[36]);
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)

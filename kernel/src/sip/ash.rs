@@ -21,6 +21,9 @@ pub enum Instruction {
     JneFwd(Reg, Reg, u8),
     JltFwd(Reg, Reg, u8),
     LoadContext(Reg, usize),
+    StoreContext(Reg, usize),
+    LoadDyn(Reg, Reg),
+    StoreDyn(Reg, Reg),
     Exit,
 }
 
@@ -31,7 +34,7 @@ pub struct AshVm { registers: [u64; 6] }
 impl AshVm {
     pub fn new() -> Self { AshVm { registers: [0; 6] } }
 
-    pub fn execute(&mut self, instructions: &[Instruction], context: &AshContext) -> u64 {
+    pub fn execute(&mut self, instructions: &[Instruction], context: &mut AshContext) -> u64 {
         self.registers.fill(0);
         let mut pc = 0;
         while pc < instructions.len() {
@@ -67,6 +70,19 @@ impl AshVm {
                     } else {
                         self.registers[dst as usize] = 0;
                     }
+                }
+                Instruction::StoreContext(data, offset) => {
+                    if offset < context.data.len() {
+                        context.data[offset] = self.registers[data as usize] as u8;
+                    }
+                }
+                Instruction::LoadDyn(dst, src) => {
+                    let off = (self.registers[src as usize] & 0x3F) as usize;
+                    self.registers[dst as usize] = context.data[off] as u64;
+                }
+                Instruction::StoreDyn(data, off_reg) => {
+                    let off = (self.registers[off_reg as usize] & 0x3F) as usize;
+                    context.data[off] = self.registers[data as usize] as u8;
                 }
                 Instruction::Exit => break,
             }
@@ -187,6 +203,31 @@ impl AshJit {
                         code.push(0x48); code.push(0xc7); code.push(0xc0 + d); code.extend_from_slice(&[0, 0, 0, 0]);
                     }
                 }
+                Instruction::StoreContext(data_reg, offset) => {
+                    let d = Self::reg_to_x86(data_reg);
+                    if offset < 64 {
+                        // mov [rdi + disp8], reg8
+                        code.push(0x40); code.push(0x88); code.push(0x40 | (d << 3) | 0x07); code.push(offset as u8);
+                    }
+                }
+                Instruction::LoadDyn(dst, src) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    // and src, 63 (Zero-cost branchless bounds check)
+                    code.push(0x48); code.push(0x83); code.push(0xe0 | s); code.push(0x3F);
+                    // movzx dst, byte ptr [rdi + src]
+                    code.push(0x48); code.push(0x0f); code.push(0xb6);
+                    code.push(0x04 | (d << 3));
+                    code.push((s << 3) | 7);
+                }
+                Instruction::StoreDyn(data_reg, off_reg) => {
+                    let data = Self::reg_to_x86(data_reg); let off = Self::reg_to_x86(off_reg);
+                    // and off, 63
+                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x3F);
+                    // mov byte ptr [rdi + off], data
+                    code.push(0x40); code.push(0x88);
+                    code.push(0x04 | (data << 3));
+                    code.push((off << 3) | 7);
+                }
                 Instruction::Exit => {
                     code.push(0x5d); // pop rbp
                     code.push(0x5b); // pop rbx
@@ -232,9 +273,9 @@ impl AshJit {
         }
     }
 
-    pub unsafe fn execute(&self, context: &AshContext) -> u64 {
-        let func: extern "C" fn(*const AshContext) -> u64 = core::mem::transmute(self.buffer);
-        func(context as *const _)
+    pub unsafe fn execute(&self, context: &mut AshContext) -> u64 {
+        let func: extern "C" fn(*mut AshContext) -> u64 = core::mem::transmute(self.buffer);
+        func(context as *mut _)
     }
 }
 
