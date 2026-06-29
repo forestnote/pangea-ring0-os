@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-6-1 に更新
-            println!("PangeaOS v0.0.1-6-1: W^X Enforced Ring 0 JIT Compiler.");
+            // ★ バージョンとブートシグネチャを v0.0.1-6-2 に更新
+            println!("PangeaOS v0.0.1-6-2: Advanced ASH JIT Compiler.");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,31 +226,45 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Advanced Packets)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Advanced Mode)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Advanced Mode)...");
 
             let mut ctx = AshContext { data: [0; 64] };
-            ctx.data[0] = 42;
-            ctx.data[1] = 10;
+            // Mock IPv4 Header: Version(4) | IHL(5) = 0x45 in byte 0.
+            // Packet length in bytes 2 and 3: 0x01, 0xBB (443)
+            ctx.data[0] = 0x45;
+            ctx.data[2] = 0x01;
+            ctx.data[3] = 0xBB;
 
             let bytecode = [
-                Instruction::LoadContext(Reg::R1, 0), // R1 = 42 (0b101010)
-                Instruction::LoadContext(Reg::R2, 1), // R2 = 10 (0b001010)
-                
-                Instruction::And(Reg::R1, Reg::R2), // R1 = 42 & 10 = 10
-                Instruction::LoadImm(Reg::R3, 10),  // R3 = 10
-                
-                Instruction::JeqFwd(Reg::R1, Reg::R3, 2), // Jump over next 2 instructions if R1 == R3
-                
-                Instruction::LoadImm(Reg::R0, 999), // Should be skipped
-                Instruction::LoadImm(Reg::R0, 888), // Should be skipped
-                
-                Instruction::LoadImm(Reg::R4, 100), // Target of jump. R4 = 100
-                Instruction::Or(Reg::R0, Reg::R4),  // R0 = 0 | 100 = 100
-                Instruction::Xor(Reg::R0, Reg::R3), // R0 = 100 ^ 10 = 110
-                
+                // Load byte 0 (Version/IHL)
+                Instruction::LoadContext(Reg::R1, 0),
+                Instruction::LoadImm(Reg::R2, 0x45),
+                // If not IPv4 with IHL=5, skip parsing (offset 10 instructions)
+                Instruction::JneFwd(Reg::R1, Reg::R2, 10),
+
+                // Load Length (Big Endian)
+                Instruction::LoadContext(Reg::R3, 2), // High byte: 0x01
+                Instruction::Shl(Reg::R3, 8),         // R3 = 0x0100
+                Instruction::LoadContext(Reg::R4, 3), // Low byte: 0xBB
+                Instruction::Or(Reg::R3, Reg::R4),    // R3 = 0x01BB (443)
+
+                // Check if Length < 500
+                Instruction::LoadImm(Reg::R5, 500),
+                Instruction::JltFwd(Reg::R3, Reg::R5, 2), // If < 500, skip next 2 instructions
+
+                // If >= 500
+                Instruction::LoadImm(Reg::R0, 9999), // R0 = 9999 (Reject, too large)
+                Instruction::Exit,
+
+                // If < 500, Valid small packet
+                Instruction::LoadImm(Reg::R0, 1), // R0 = 1 (Accept)
+                Instruction::Exit,
+
+                // Target for JneFwd (Not IPv4)
+                Instruction::LoadImm(Reg::R0, 0), // R0 = 0 (Reject)
                 Instruction::Exit,
             ];
 

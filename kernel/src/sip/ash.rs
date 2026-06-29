@@ -15,7 +15,11 @@ pub enum Instruction {
     And(Reg, Reg),
     Or(Reg, Reg),
     Xor(Reg, Reg),
+    Shl(Reg, u8),
+    Shr(Reg, u8),
     JeqFwd(Reg, Reg, u8),
+    JneFwd(Reg, Reg, u8),
+    JltFwd(Reg, Reg, u8),
     LoadContext(Reg, usize),
     Exit,
 }
@@ -40,8 +44,20 @@ impl AshVm {
                 Instruction::And(dst, src) => self.registers[dst as usize] &= self.registers[src as usize],
                 Instruction::Or(dst, src) => self.registers[dst as usize] |= self.registers[src as usize],
                 Instruction::Xor(dst, src) => self.registers[dst as usize] ^= self.registers[src as usize],
+                Instruction::Shl(dst, shift) => self.registers[dst as usize] <<= shift,
+                Instruction::Shr(dst, shift) => self.registers[dst as usize] >>= shift,
                 Instruction::JeqFwd(dst, src, offset) => {
                     if self.registers[dst as usize] == self.registers[src as usize] {
+                        pc += offset as usize;
+                    }
+                }
+                Instruction::JneFwd(dst, src, offset) => {
+                    if self.registers[dst as usize] != self.registers[src as usize] {
+                        pc += offset as usize;
+                    }
+                }
+                Instruction::JltFwd(dst, src, offset) => {
+                    if self.registers[dst as usize] < self.registers[src as usize] {
                         pc += offset as usize;
                     }
                 }
@@ -125,12 +141,40 @@ impl AshJit {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
                     code.push(0x48); code.push(0x31); code.push(0xc0 | (s << 3) | d);
                 }
+                Instruction::Shl(dst, shift) => {
+                    let d = Self::reg_to_x86(dst);
+                    code.push(0x48); code.push(0xc1); code.push(0xe0 | d); code.push(shift);
+                }
+                Instruction::Shr(dst, shift) => {
+                    let d = Self::reg_to_x86(dst);
+                    code.push(0x48); code.push(0xc1); code.push(0xe8 | d); code.push(shift);
+                }
                 Instruction::JeqFwd(dst, src, offset) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
                     // cmp dst, src
                     code.push(0x48); code.push(0x39); code.push(0xc0 | (s << 3) | d);
                     // je rel32
                     code.push(0x0f); code.push(0x84);
+                    let patch_offset = code.len();
+                    code.extend_from_slice(&[0, 0, 0, 0]); // dummy offset
+                    backpatch_list.push((patch_offset, i + 1 + offset as usize));
+                }
+                Instruction::JneFwd(dst, src, offset) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    // cmp dst, src
+                    code.push(0x48); code.push(0x39); code.push(0xc0 | (s << 3) | d);
+                    // jne rel32
+                    code.push(0x0f); code.push(0x85);
+                    let patch_offset = code.len();
+                    code.extend_from_slice(&[0, 0, 0, 0]); // dummy offset
+                    backpatch_list.push((patch_offset, i + 1 + offset as usize));
+                }
+                Instruction::JltFwd(dst, src, offset) => {
+                    let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
+                    // cmp dst, src
+                    code.push(0x48); code.push(0x39); code.push(0xc0 | (s << 3) | d);
+                    // jb rel32 (unsigned less than)
+                    code.push(0x0f); code.push(0x82);
                     let patch_offset = code.len();
                     code.extend_from_slice(&[0, 0, 0, 0]); // dummy offset
                     backpatch_list.push((patch_offset, i + 1 + offset as usize));
