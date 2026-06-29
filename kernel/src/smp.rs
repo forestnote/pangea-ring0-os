@@ -39,7 +39,7 @@ pub fn tlb_shootdown(addr: u64) {
     let cores = ACTIVE_CORES.load(Ordering::Acquire);
     if cores <= 1 {
         // シングルコア環境の場合は自コアのTLBフラッシュのみで完了
-        unsafe { x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr)) };
+        x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr));
         return;
     }
 
@@ -55,5 +55,5 @@ pub fn tlb_shootdown(addr: u64) {
     }
     
     // 自コアのTLBも最後にフラッシュ
-    unsafe { x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr)) };
+    x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr));
 }

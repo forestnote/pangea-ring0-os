@@ -155,7 +155,7 @@ extern "x86-interrupt" fn double_fault_handler(stack_frame: InterruptStackFrame,
 extern "x86-interrupt" fn tlb_shootdown_handler(_stack_frame: InterruptStackFrame) {
     let addr = crate::smp::SHOOTDOWN_ADDR.load(core::sync::atomic::Ordering::Acquire);
     if addr != 0 {
-        unsafe { x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr)) };
+        x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(addr));
     }
     crate::smp::SHOOTDOWN_ACK.fetch_add(1, core::sync::atomic::Ordering::Release);
     crate::apic::eoi();
