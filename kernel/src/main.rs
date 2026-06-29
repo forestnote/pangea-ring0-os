@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-6-3 に更新
-            println!("PangeaOS v0.0.1-6-3: Dynamic W^X Packet Rewriter.");
+            // ★ バージョンとブートシグネチャを v0.0.1-6-4 に更新
+            println!("PangeaOS v0.0.1-6-4: Stateful Ring 0 JIT Firewall.");
 
             gdt::init();
             interrupts::init_idt();
@@ -226,42 +226,49 @@ pub extern "C" fn _start() -> ! {
             }
 
             // ==========================================
-            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Dynamic Packet Rewriter)
+            // ★ Phase 4: ASH JIT & W^X Enforcer の実証 (Stateful Firewall)
             // ==========================================
-            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Rewriter Mode)...");
-            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Rewriter Mode)...");
+            println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Stateful Firewall Mode)...");
+            serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Stateful Firewall Mode)...");
 
-            let mut ctx = AshContext { data: [0; 64] };
+            let mut ctx = AshContext { data: [0; 64], state: [0; 8] };
             // Mock IPv4 Header
             ctx.data[0] = 0x45;
             ctx.data[2] = 0x01;
             ctx.data[3] = 0xBB;
             ctx.data[10] = 0x00; // Checksum placeholder
+            
+            // Set initial state (e.g. connection counter)
+            ctx.state[0] = 5;
 
             let bytecode = [
-                // 1. Static Packet Rewrite: Change Version/IHL from 0x45 to 0x46
-                Instruction::LoadImm(Reg::R1, 0x46),
-                Instruction::StoreContext(Reg::R1, 0),
+                // 1. Stateful Access: Load connection count from State[0]
+                Instruction::LoadState(Reg::R1, 0), // R1 = state[0]
+                
+                // 2. Increment connection count
+                Instruction::LoadImm(Reg::R2, 1),
+                Instruction::Add(Reg::R1, Reg::R2), // R1 = R1 + 1
+                
+                // 3. Store back to State[0]
+                Instruction::StoreState(Reg::R1, 0), // state[0] = R1
+                
+                // 4. Rate Limiting Check: If connections > 10, drop packet
+                Instruction::LoadImm(Reg::R3, 10),
+                Instruction::JltFwd(Reg::R1, Reg::R3, 2), // If R1 < 10, skip drop
+                
+                // Drop packet (R0 = 0)
+                Instruction::LoadImm(Reg::R0, 0),
+                Instruction::Exit,
+                
+                // 5. Dynamic Packet Rewriting (Zero-Cost MBC)
+                // Read byte at dynamic offset 3, XOR with state[0], store at 10
+                Instruction::LoadImm(Reg::R4, 3), // Offset 3
+                Instruction::LoadDyn(Reg::R5, Reg::R4), // R5 = data[3]
+                Instruction::Xor(Reg::R5, Reg::R1), // R5 = data[3] ^ state[0]
+                Instruction::LoadImm(Reg::R2, 10), // Offset 10
+                Instruction::StoreDyn(Reg::R5, Reg::R2), // data[10] = R5
 
-                // 2. Dynamic Memory Access: Read byte at dynamic offset (from R2)
-                Instruction::LoadImm(Reg::R2, 3), // Offset 3 (holds 0xBB)
-                Instruction::LoadDyn(Reg::R3, Reg::R2), // R3 = data[3] = 0xBB
-
-                // 3. Bitwise Math: Invert the byte (XOR with 0xFF)
-                Instruction::LoadImm(Reg::R4, 0xFF),
-                Instruction::Xor(Reg::R3, Reg::R4), // R3 = 0xBB ^ 0xFF = 0x44
-
-                // 4. Dynamic Memory Write: Store result to dynamic offset (from R5)
-                Instruction::LoadImm(Reg::R5, 10), // Offset 10
-                Instruction::StoreDyn(Reg::R3, Reg::R5), // data[10] = 0x44
-
-                // 5. Check Zero-Cost Bounds Checking Security
-                // Try to write to offset 100 (out of bounds). It will be masked to 100 & 63 = 36.
-                Instruction::LoadImm(Reg::R2, 100),
-                Instruction::LoadImm(Reg::R1, 0x99),
-                Instruction::StoreDyn(Reg::R1, Reg::R2), // Safely writes to data[36] instead of crashing OS!
-
-                // Accept packet
+                // Accept packet (R0 = 1)
                 Instruction::LoadImm(Reg::R0, 1),
                 Instruction::Exit,
             ];
@@ -283,12 +290,10 @@ pub extern "C" fn _start() -> ! {
 
             println!("        -> [ ASH JIT ] Native Result: {}", native_result);
             serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
-            println!("        -> [ ASH JIT ] Packet Byte 0 (Rewritten): {:#04x}", ctx.data[0]);
-            serial_println!("        -> [ ASH JIT ] Packet Byte 0 (Rewritten): {:#04x}", ctx.data[0]);
-            println!("        -> [ ASH JIT ] Packet Byte 10 (Dynamic XOR): {:#04x}", ctx.data[10]);
-            serial_println!("        -> [ ASH JIT ] Packet Byte 10 (Dynamic XOR): {:#04x}", ctx.data[10]);
-            println!("        -> [ ASH JIT ] Packet Byte 36 (MBC Safe Bounds): {:#04x}", ctx.data[36]);
-            serial_println!("        -> [ ASH JIT ] Packet Byte 36 (MBC Safe Bounds): {:#04x}", ctx.data[36]);
+            println!("        -> [ ASH JIT ] New Connection Count (State[0]): {}", ctx.state[0]);
+            serial_println!("        -> [ ASH JIT ] New Connection Count (State[0]): {}", ctx.state[0]);
+            println!("        -> [ ASH JIT ] Packet Byte 10 (Stateful Dynamic XOR): {:#04x}", ctx.data[10]);
+            serial_println!("        -> [ ASH JIT ] Packet Byte 10 (Stateful Dynamic XOR): {:#04x}", ctx.data[10]);
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)

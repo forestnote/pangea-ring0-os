@@ -24,10 +24,17 @@ pub enum Instruction {
     StoreContext(Reg, usize),
     LoadDyn(Reg, Reg),
     StoreDyn(Reg, Reg),
+    LoadState(Reg, u8),
+    StoreState(Reg, u8),
+    LoadStateDyn(Reg, Reg),
+    StoreStateDyn(Reg, Reg),
     Exit,
 }
 
-pub struct AshContext { pub data: [u8; 64] }
+pub struct AshContext {
+    pub data: [u8; 64],
+    pub state: [u64; 8],
+}
 
 pub struct AshVm { registers: [u64; 6] }
 
@@ -83,6 +90,24 @@ impl AshVm {
                 Instruction::StoreDyn(data, off_reg) => {
                     let off = (self.registers[off_reg as usize] & 0x3F) as usize;
                     context.data[off] = self.registers[data as usize] as u8;
+                }
+                Instruction::LoadState(dst, offset) => {
+                    if offset < 8 {
+                        self.registers[dst as usize] = context.state[offset as usize];
+                    }
+                }
+                Instruction::StoreState(src, offset) => {
+                    if offset < 8 {
+                        context.state[offset as usize] = self.registers[src as usize];
+                    }
+                }
+                Instruction::LoadStateDyn(dst, off_reg) => {
+                    let off = (self.registers[off_reg as usize] & 0x07) as usize;
+                    self.registers[dst as usize] = context.state[off];
+                }
+                Instruction::StoreStateDyn(data, off_reg) => {
+                    let off = (self.registers[off_reg as usize] & 0x07) as usize;
+                    context.state[off] = self.registers[data as usize];
                 }
                 Instruction::Exit => break,
             }
@@ -227,6 +252,42 @@ impl AshJit {
                     code.push(0x40); code.push(0x88);
                     code.push(0x04 | (data << 3));
                     code.push((off << 3) | 7);
+                }
+                Instruction::LoadState(dst, offset) => {
+                    let d = Self::reg_to_x86(dst);
+                    if offset < 8 {
+                        let disp = 64 + offset * 8;
+                        // mov r64, qword ptr [rdi + disp8]
+                        code.push(0x48); code.push(0x8b); code.push(0x40 | (d << 3) | 0x07); code.push(disp as u8);
+                    }
+                }
+                Instruction::StoreState(src, offset) => {
+                    let s = Self::reg_to_x86(src);
+                    if offset < 8 {
+                        let disp = 64 + offset * 8;
+                        // mov qword ptr [rdi + disp8], r64
+                        code.push(0x48); code.push(0x89); code.push(0x40 | (s << 3) | 0x07); code.push(disp as u8);
+                    }
+                }
+                Instruction::LoadStateDyn(dst, off_reg) => {
+                    let d = Self::reg_to_x86(dst); let off = Self::reg_to_x86(off_reg);
+                    // and off_reg, 7
+                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x07);
+                    // mov dst, qword ptr [rdi + off_reg * 8 + 64]
+                    code.push(0x48); code.push(0x8b);
+                    code.push(0x40 | (d << 3) | 0x04); // mod=01, reg=d, rm=100
+                    code.push(0xc0 | (off << 3) | 0x07); // SIB: scale=8, index=off, base=rdi
+                    code.push(64); // disp8 = 64
+                }
+                Instruction::StoreStateDyn(data_reg, off_reg) => {
+                    let data = Self::reg_to_x86(data_reg); let off = Self::reg_to_x86(off_reg);
+                    // and off_reg, 7
+                    code.push(0x48); code.push(0x83); code.push(0xe0 | off); code.push(0x07);
+                    // mov qword ptr [rdi + off_reg * 8 + 64], data
+                    code.push(0x48); code.push(0x89);
+                    code.push(0x40 | (data << 3) | 0x04); // mod=01, reg=data, rm=100
+                    code.push(0xc0 | (off << 3) | 0x07); // SIB: scale=8, index=off, base=rdi
+                    code.push(64); // disp8 = 64
                 }
                 Instruction::Exit => {
                     code.push(0x5d); // pop rbp
