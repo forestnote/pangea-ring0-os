@@ -48,6 +48,12 @@ pub extern "C" fn helper_debug_print(val: u64) -> u64 {
     0
 }
 
+pub extern "C" fn helper_sls_map(oid: u64) -> u64 {
+    // [ Intel IBT (Indirect Branch Tracking) ]
+    unsafe { core::arch::asm!("endbr64") };
+    crate::sls::get_object(crate::sls::ObjectId(oid)).unwrap_or(0)
+}
+
 // --- CHERI (Capability Hardware Enhanced RISC Instructions) Concept ---
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Perms(pub u8);
@@ -562,6 +568,30 @@ impl AshJit {
                         code.push(0x5a); // pop rdx
                         code.push(0x59); // pop rcx
                         code.push(0x5f); // pop rdi
+                    } else if func_id == 2 {
+                        // helper_sls_map (Takes OID in R1, returns mapped address in R0)
+                        code.push(0x57); // push rdi
+                        code.push(0x51); // push rcx
+                        code.push(0x52); // push rdx
+                        code.push(0x56); // push rsi
+                        code.push(0x41); code.push(0x51); // push r9
+
+                        code.push(0x48); code.push(0x89); code.push(0xcf); // mov rdi, rcx (Pass R1 as first arg)
+
+                        let addr = helper_sls_map as *const () as usize;
+                        code.push(0x49); code.push(0xbb); code.extend_from_slice(&addr.to_le_bytes()); // mov r11, addr
+                        code.push(0x41); code.push(0xff); code.push(0xd3); // call r11
+
+                        // Pop registers
+                        code.push(0x41); code.push(0x59); // pop r9
+                        code.push(0x5e); // pop rsi
+                        code.push(0x5a); // pop rdx
+                        code.push(0x59); // pop rcx
+                        code.push(0x5f); // pop rdi
+
+                        // Move return value from rax to R0
+                        let d = Self::reg_to_x86(Reg::R0);
+                        code.push(0x49); code.push(0x89); code.push(0xc0 | d); // mov reg[R0], rax
                     }
                 }
                 Instruction::Exit => {
@@ -644,8 +674,8 @@ impl AshJit {
                     }
                 }
                 Instruction::CallExt(id) => {
-                    if *id > 1 {
-                        return Err("Invalid helper function ID");
+                    if *id > 2 {
+                        return Err("Invalid helper function ID (Max: 2)");
                     }
                 }
                 _ => {}

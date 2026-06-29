@@ -26,6 +26,7 @@ pub mod cpu;
 pub mod mpk;
 pub mod cet;
 pub mod cat;
+pub mod sls;
 pub mod smp;
 
 // --- POSIX システムコール互換レイヤー ---
@@ -211,7 +212,7 @@ pub extern "C" fn _start() -> ! {
             mpk::enable_pks();
             cet::initialize();
             cat::initialize();
-            println!("[+] Hardware Protection (SMEP/SMAP/PKU/PKS) Enabled.");
+            println!("[+] Hardware Protection (SMEP/SMAP/PKU/PKS/CET/CAT) Enabled.");
             
             // ★ Phase 5: POSIXシステムコール・エミュレーション初期化
             syscall::init();
@@ -244,6 +245,9 @@ pub extern "C" fn _start() -> ! {
                 drop(allocator_guard);
 
                 println!("[ OK ] Global Heap Mapped. Allocator Ready.");
+
+                sls::initialize();
+                sls::create_object(sls::ObjectId(0x9999), 4096);
 
                 let bsp_lapic_id = apic::lapic_id();
                 *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);
