@@ -28,6 +28,8 @@ pub mod cet;
 pub mod cat;
 pub mod sls;
 pub mod smp;
+pub mod pci;
+pub mod net;
 
 // --- POSIX システムコール互換レイヤー ---
 pub mod syscall;
@@ -201,8 +203,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.4-5 に更新
-            println!("PangeaOS v0.0.4-5: Transparent Memory Encryption (TME).");
+            // ★ バージョンとブートシグネチャを v0.0.5 に更新
+            println!("PangeaOS v0.0.5: Ultra-high-speed Network Stack & Ring 0 Web Server.");
 
             gdt::init();
             interrupts::init_idt();
@@ -252,6 +254,10 @@ pub extern "C" fn _start() -> ! {
                 let cap_token = sls::generate_capability(oid);
                 
                 println!("[ SLS ] Object {:#x} Capability Token: {:#x}", oid.0, cap_token);
+                
+                // Initialize PCI and Networking
+                pci::init();
+                net::init();
                 
                 let bsp_lapic_id = apic::lapic_id();
                 *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);
