@@ -327,19 +327,7 @@ impl AshJit {
                         code.push(0x48); code.push(0x89); code.push(0x40 | (s << 3) | 0x07); code.push(disp as u8);
                     }
                 }
-                Instruction::LoadStateDyn(dst, off_reg) => {
-                    let d = Self::reg_to_x86(dst); let off = Self::reg_to_x86(off_reg);
-                    // mov r8, off
-                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
-                    // and r8, 7
-                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07);
-                    // mov dst, qword ptr [rdi + r8 * 8 + 64]
-                    code.push(0x4a); code.push(0x8b);
-                    code.push(0x40 | (d << 3) | 0x04);
-                    code.push(0xc7);
-                    code.push(64); // disp8 = 64
-                }
-                Instruction::StoreStateDyn(data_reg, off_reg) => {
+
                 Instruction::LoadStateDyn(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
                     // Bounds Check: and src, 0x07 (max 8 states)
