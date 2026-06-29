@@ -428,7 +428,7 @@ impl AshJit {
                         code.push(0x56); // push rsi
                         code.push(0x41); code.push(0x51); // push r9
 
-                        let addr = helper_get_time as usize;
+                        let addr = helper_get_time as *const () as usize;
                         code.push(0x49); code.push(0xbb); code.extend_from_slice(&addr.to_le_bytes()); // mov r11, addr
                         code.push(0x41); code.push(0xff); code.push(0xd3); // call r11
 
@@ -453,7 +453,7 @@ impl AshJit {
 
                         code.push(0x48); code.push(0x89); code.push(0xcf); // mov rdi, rcx (Pass R1 as first arg)
 
-                        let addr = helper_debug_print as usize;
+                        let addr = helper_debug_print as *const () as usize;
                         code.push(0x49); code.push(0xbb); code.extend_from_slice(&addr.to_le_bytes()); // mov r11, addr
                         code.push(0x41); code.push(0xff); code.push(0xd3); // call r11
 
