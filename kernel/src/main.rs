@@ -154,7 +154,7 @@ async fn sip_alpha_main(env: SipEnv, sender: Sender<String>) {
         let message = format!("Highly Classified Data Core Segment #{}", i);
         println!("        -> [ SIP Alpha ] Sending data: '{}'", message);
         serial_println!("        -> [ SIP Alpha ] Sending data: '{}'", message);
-        sender.send(message);
+        sender.send(message).await;
     }
     println!("[ SIP Alpha ] All payloads transmitted. Terminating.");
 }
@@ -393,7 +393,7 @@ pub extern "C" fn _start() -> ! {
             // ==========================================
             println!("\n[ TARGET ACQUIRED ] Igniting Fully Preemptive Zero-Cost Concurrency Engine...");
 
-            let (tx, rx) = ipc::channel::<String>();
+            let (tx, rx) = ipc::channel::<String>(2); // 容量2のBounded Channel (OOM DoS防御)
             *ALPHA_TX.lock() = Some(tx);
             *BETA_RX.lock() = Some(rx);
 

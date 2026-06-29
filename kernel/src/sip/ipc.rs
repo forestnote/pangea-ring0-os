@@ -8,7 +8,9 @@ use spin::Mutex;
 /// 送信側と受信側で共有される内部状態
 struct Shared<T> {
     queue: VecDeque<T>,
-    waker: Option<Waker>,
+    capacity: usize,
+    rx_waker: Option<Waker>,
+    tx_wakers: alloc::vec::Vec<Waker>,
 }
 
 /// 【送信エンドポイント】
@@ -19,16 +21,43 @@ pub struct Sender<T> {
 }
 
 impl<T> Sender<T> {
-    /// データを送信する。
-    /// 引数 `data` の所有権を完全に奪うため、送信元はこれ以降 `data` に一切アクセスできなくなる。
-    /// （これが Rust によるコンパイル時のゼロコスト・メモリ保護防壁である）
-    pub fn send(&self, data: T) {
-        let mut shared = self.shared.lock();
-        shared.queue.push_back(data);
+    /// 非同期にデータを送信する Future を返す。
+    /// キューが満杯の場合は、空き容量ができるまで現在のタスクを休止（Yield）させる（バックプレッシャーの実現）。
+    pub fn send(&self, data: T) -> SendFuture<T> {
+        SendFuture {
+            shared: Arc::clone(&self.shared),
+            data: Some(data),
+        }
+    }
+}
 
-        // データがキューに入ったため、受信側プロセスが眠っていれば叩き起こす
-        if let Some(waker) = shared.waker.take() {
-            waker.wake();
+/// 送信用の非同期ステートマシン (Future)
+pub struct SendFuture<T> {
+    shared: Arc<Mutex<Shared<T>>>,
+    data: Option<T>,
+}
+
+impl<T> Future for SendFuture<T> {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = unsafe { self.get_unchecked_mut() };
+        let mut shared = this.shared.lock();
+
+        // キューに空き容量があるか確認
+        if shared.queue.len() < shared.capacity {
+            let data = this.data.take().expect("SendFuture polled after completion");
+            shared.queue.push_back(data);
+
+            // 受信側が眠っていれば起こす
+            if let Some(waker) = shared.rx_waker.take() {
+                waker.wake();
+            }
+            Poll::Ready(())
+        } else {
+            // 容量がいっぱいの場合はWakerを登録してサスペンド（Backpressure）
+            shared.tx_wakers.push(cx.waker().clone());
+            Poll::Pending
         }
     }
 }
@@ -69,20 +98,26 @@ impl<T> Future for RecvFuture<T> {
 
         // キューにデータがあれば、即座に所有権を引き渡す（Zero-Copy）
         if let Some(data) = shared.queue.pop_front() {
+            // 空き容量ができたので、待機している送信者たちを起こす
+            for waker in shared.tx_wakers.drain(..) {
+                waker.wake();
+            }
             Poll::Ready(data)
         } else {
             // データがなければ、現在のタスク（SIP）のWakerを登録して休止（Yield）する
-            shared.waker = Some(cx.waker().clone());
+            shared.rx_waker = Some(cx.waker().clone());
             Poll::Pending
         }
     }
 }
 
-/// 特権空間用のゼロコピー非同期チャネルを生成する
-pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
+/// 容量制限付きの特権空間用ゼロコピー非同期チャネルを生成する
+pub fn channel<T>(capacity: usize) -> (Sender<T>, Receiver<T>) {
     let shared = Arc::new(Mutex::new(Shared {
-        queue: VecDeque::new(),
-                                     waker: None,
+        queue: VecDeque::with_capacity(capacity),
+        capacity,
+        rx_waker: None,
+        tx_wakers: alloc::vec::Vec::new(),
     }));
 
     (
