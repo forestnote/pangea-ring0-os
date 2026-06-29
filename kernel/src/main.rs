@@ -185,8 +185,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.1-9 に更新
-            println!("PangeaOS v0.0.1-9: Ultimate JIT Security (Constant Blinding).");
+            // ★ バージョンとブートシグネチャを v0.0.1-9-1 に更新
+            println!("PangeaOS v0.0.1-9-1: Ultimate JIT Security (Zero-Day Patches).");
 
             gdt::init();
             interrupts::init_idt();
