@@ -25,6 +25,7 @@ pub mod sip;
 pub mod cpu;
 pub mod mpk;
 pub mod cet;
+pub mod cat;
 pub mod smp;
 
 // --- POSIX システムコール互換レイヤー ---
@@ -209,6 +210,7 @@ pub extern "C" fn _start() -> ! {
             cpu::init_features();
             mpk::enable_pks();
             cet::initialize();
+            cat::initialize();
             println!("[+] Hardware Protection (SMEP/SMAP/PKU/PKS) Enabled.");
             
             // ★ Phase 5: POSIXシステムコール・エミュレーション初期化

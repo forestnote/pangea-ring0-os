@@ -335,6 +335,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = memory.base (offset 0)
                     code.push(0x4c); code.push(0x8b); code.push(0x17);
                     // movzx dst, byte ptr [r10 + r8]
@@ -348,6 +350,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = memory.base
                     code.push(0x4c); code.push(0x8b); code.push(0x17);
                     // mov byte ptr [r10 + r8], src
@@ -361,6 +365,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = memory.base (offset 0)
                     code.push(0x4c); code.push(0x8b); code.push(0x17);
                     // movzx dst, byte ptr [r10 + r8]
@@ -374,6 +380,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = memory.base (offset 0)
                     code.push(0x4c); code.push(0x8b); code.push(0x17);
                     // mov byte ptr [r10 + r8], data
@@ -387,6 +395,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = state.base (offset 24)
                     code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
                     // mov dst, qword ptr [r10 + r8 * 8]
@@ -400,6 +410,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = state.base (offset 24)
                     code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
                     // mov qword ptr [r10 + r8 * 8], src
@@ -414,6 +426,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = state.base (offset 24)
                     code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
                     // mov dst, qword ptr [r10 + r8 * 8]
@@ -427,6 +441,8 @@ impl AshJit {
                     code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
                     // and r8, r11
                     code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // lfence (Speculative Load Hardening against Spectre v1)
+                    code.push(0x0f); code.push(0xae); code.push(0xe8);
                     // r10 = state.base
                     code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
                     // mov qword ptr [r10 + r8 * 8], src
@@ -742,6 +758,9 @@ impl AshProcess {
         pkrs = crate::mpk::set_key_rights(pkrs, active_key, false, false); // Unlock this SIP's Active Key
         
         crate::mpk::write_pkrs(pkrs);
+
+        // Intel CAT Isolation: このコア用のL3キャッシュ区画をSIPに割り当て（サイドチャネル攻撃の物理的遮断）
+        crate::cat::assign_sip_cache_partition(crate::apic::lapic_id());
         
         let result = unsafe { self.jit.execute(&mut ctx) };
         
