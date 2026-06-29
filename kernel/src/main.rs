@@ -61,7 +61,7 @@ static MEMMAP_REQUEST: MemmapRequest = MemmapRequest::new();
 
 #[used]
 #[link_section = ".requests"]
-static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
+pub static HHDM_REQUEST: HhdmRequest = HhdmRequest::new();
 
 #[used]
 #[link_section = ".requests"]

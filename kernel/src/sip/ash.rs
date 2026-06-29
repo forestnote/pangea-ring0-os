@@ -721,14 +721,25 @@ impl AshProcess {
             }
         };
         
-        // MPK Isolation: Unlock the specific key for this sandbox before execution
-        // Assume PKRS = 0 by default. We might want to lock ALL keys except 0 and this key, 
-        // but for now, we just ensure this key is unlocked. 
-        // If we want true isolation, we set PKRS such that ONLY Key 0 (Kernel) and our Key are accessible.
-        // Actually, we can lock ALL keys except 0 and this key.
+        // --- PKS Key Multiplexing (動的キー再割り当て機構) ---
+        // ハードウェア制限(15個)を突破するため、現在の実行コア固有のキーを動的に割り当てる
+        let active_key = (crate::apic::lapic_id() % 14) as u8 + 1; // Key 1~14
+        self.mpk_key = active_key; // 現在のキー状態を更新
+
+        let hhdm_offset = crate::HHDM_REQUEST.response().unwrap().offset;
+        
+        // PTE上のPKSキーを現在のコア用に書き換える
+        crate::mpk::tag_page(x86_64::VirtAddr::new(self.memory_ptr as u64), active_key, hhdm_offset);
+        crate::mpk::tag_page(x86_64::VirtAddr::new(self.state_ptr as u64), active_key, hhdm_offset);
+
+        // キャッシュ（TLB）をローカルフラッシュし、新しいキーをプロセッサに認識させる
+        x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(self.memory_ptr as u64));
+        x86_64::instructions::tlb::flush(x86_64::VirtAddr::new(self.state_ptr as u64));
+
+        // MPK Isolation: このコアの割り当てキー(active_key)のみをアンロックする
         let mut pkrs = 0xFFFFFFFF; // Lock all 16 keys (AD=1, WD=1)
         pkrs = crate::mpk::set_key_rights(pkrs, 0, false, false); // Unlock Key 0 (Kernel)
-        pkrs = crate::mpk::set_key_rights(pkrs, self.mpk_key, false, false); // Unlock this SIP's Key
+        pkrs = crate::mpk::set_key_rights(pkrs, active_key, false, false); // Unlock this SIP's Active Key
         
         crate::mpk::write_pkrs(pkrs);
         
