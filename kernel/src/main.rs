@@ -258,7 +258,7 @@ pub extern "C" fn _start() -> ! {
                 // Initialize PCI and Networking
                 let e1000_mmio = pci::init();
                 
-                if let Some((_, _, _, phys_addr)) = e1000_mmio {
+                if let Some((phys_addr, _irq)) = e1000_mmio {
                     use x86_64::structures::paging::{Page, PhysFrame, Mapper, Size4KiB, PageTableFlags};
                     use x86_64::{VirtAddr, PhysAddr};
                     let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::NO_CACHE | PageTableFlags::NO_EXECUTE;

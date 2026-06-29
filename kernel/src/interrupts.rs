@@ -13,6 +13,7 @@ pub static PICS: Mutex<ChainedPics> = Mutex::new(unsafe { ChainedPics::new(PIC_1
 #[repr(u8)]
 pub enum InterruptIndex {
     Timer = PIC_1_OFFSET,
+    Network = PIC_1_OFFSET + 11,
     TlbShootdown = 0x40,
 }
 
@@ -43,6 +44,8 @@ lazy_static! {
         unsafe {
             idt[InterruptIndex::Timer.as_usize()]
                 .set_handler_addr(x86_64::VirtAddr::new(timer_interrupt_handler_naked as *const () as u64));
+            idt[InterruptIndex::Network.as_usize()]
+                .set_handler_fn(network_interrupt_handler);
             idt[InterruptIndex::TlbShootdown.as_usize()]
                 .set_handler_fn(tlb_shootdown_handler);
             
@@ -128,6 +131,16 @@ pub extern "C" fn preempt_schedule(old_rsp: u64) -> u64 {
 #[no_mangle]
 pub extern "C" fn apic_eoi_c() {
     crate::apic::eoi();
+}
+
+pub extern "x86-interrupt" fn network_interrupt_handler(_stack_frame: InterruptStackFrame) {
+    crate::serial_println!("[ NET ] Asynchronous Network Interrupt (Packet Event) Received!");
+    
+    crate::net::ack_interrupt();
+    
+    unsafe {
+        PICS.lock().notify_end_of_interrupt(InterruptIndex::Network.as_u8());
+    }
 }
 extern "x86-interrupt" fn breakpoint_handler(stack_frame: InterruptStackFrame) {
     println!("\n[ WARNING ] EXCEPTION: BREAKPOINT");
