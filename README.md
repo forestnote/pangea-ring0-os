@@ -116,95 +116,31 @@ PageDown / ArrowDown : ターミナル履歴バッファを下にスクロール
 
 
 
-🗺️ ロードマップ (Roadmap & Milestones)
-
-Phase 1〜3: 掌握と防壁の構築 (Completed 🎉)
-
-
-
-
-PMM/VMM による物理・仮想メモリの支配と Ring 0 絶対防壁の構築
-
-
-
-
-Ring 0 非同期タスク / Async-Await 基盤の構築
-
-
-
-
-True Mesh Allocator と Local APIC モダン割り込みエンジンへの移行
-
-Phase 4: Ring 0空間における「ソフトウェア定義」の多層防壁構築 (Completed 🎉)
-
-
-
-
-v0.0.1-4: マルチコアプロセッシング (SMP: Symmetric Multiprocessing) の初期化
-
-
-
-
-v0.0.1-5: ソフトウェア分離プロセス (SIPs) と所有権駆動型のゼロコピーIPCの確立
-
-
-
-
-v0.0.1-6-1: ASH (Application-Specific Safe Handlers) JIT コンパイラの錬成
-
-
-
-
-v0.0.1-6-1: VMM統合による W^X (Write XOR Execute) メモリ防壁の確立
-
-
-
-
-v0.0.1-6-2: 高度なパケット解析用JIT命令 (Shl/Shr/Jne/Jlt) の拡張
-
-
-
-
-v0.0.1-6-3: 動的パケット書き換え機能と Zero-Cost MBC (ブランチレス境界チェック) の導入
-
-
-
-
-v0.0.1-6-4: 状態保持メモリ (Persistent State) による Stateful Firewall 機能の完成
-
-
-
-
-v0.0.1-6-5: Bounded Loops と Endian-Aware Access によるチューリング完全なパケットインスペクション
-
-
-
-
-v0.0.1-7: Ring 0 FFI (Kernel Callbacks) の実装によるJITからカーネル機能への直接アクセス
-
-
-
-
-v0.0.1-8: Gasリミットと厳密な境界検証を備えた真のSecure JIT Sandboxの完成
-
-Phase 5: ハードウェア支援による「物理的隔離」とレガシー互換 (Upcoming 🚀)
-
-
-
-
-CHERI (制限境界付きポインタ) アーキテクチャの統合によるハードウェアレベルのコンパートメント化
-
-
-
-
-µFork (マイクロフォーク) プロセスメカニズムの実装による POSIX 互換性の安全な移植
-
-Phase 6: VFSの完全廃止と「データ管理の特異点」
-
-
-
-
-単一レベルストア (SLS) の実現と、ファイルシステム概念の破棄（直交的永続性の確立）
+## 🗺️ ロードマップ (Roadmap & Milestones)
+
+### ✅ Phase 1〜3: 掌握と防壁の構築 (Completed)
+- [x] **PMM/VMM** による物理・仮想メモリの支配と Ring 0 絶対防壁の構築
+- [x] **Ring 0 非同期タスク** / Async-Await 基盤の構築
+- [x] **True Mesh Allocator** と Local APIC モダン割り込みエンジンへの移行
+
+### ✅ Phase 4: Ring 0空間における「ソフトウェア定義」の多層防壁構築 (Completed)
+- [x] **v0.0.1-4**: マルチコアプロセッシング (SMP: Symmetric Multiprocessing) の初期化
+- [x] **v0.0.1-5**: ソフトウェア分離プロセス (SIPs) と所有権駆動型のゼロコピーIPCの確立
+- [x] **v0.0.1-6-1**: ASH (Application-Specific Safe Handlers) JIT コンパイラの錬成
+- [x] **v0.0.1-6-1**: VMM統合による W^X (Write XOR Execute) メモリ防壁の確立
+- [x] **v0.0.1-6-2**: 高度なパケット解析用JIT命令 (Shl/Shr/Jne/Jlt) の拡張
+- [x] **v0.0.1-6-3**: 動的パケット書き換え機能と Zero-Cost MBC (ブランチレス境界チェック) の導入
+- [x] **v0.0.1-6-4**: 状態保持メモリ (Persistent State) による Stateful Firewall 機能の完成
+- [x] **v0.0.1-6-5**: Bounded Loops と Endian-Aware Access によるチューリング完全なパケットインスペクション
+- [x] **v0.0.1-7**: Ring 0 FFI (Kernel Callbacks) の実装によるJITからカーネル機能への直接アクセス
+- [x] **v0.0.1-8**: Gasリミットと厳密な境界検証を備えた真のSecure JIT Sandboxの完成
+
+### 🚀 Phase 5: ハードウェア支援による「物理的隔離」とレガシー互換 (Upcoming)
+- [ ] **CHERI (制限境界付きポインタ)** アーキテクチャの統合によるハードウェアレベルのコンパートメント化
+- [ ] **µFork (マイクロフォーク)** プロセスメカニズムの実装による POSIX 互換性の安全な移植
+
+### 🌌 Phase 6: VFSの完全廃止と「データ管理の特異点」
+- [ ] **単一レベルストア (SLS)** の実現と、ファイルシステム概念の破棄（直交的永続性の確立）
 
 
 
