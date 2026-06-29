@@ -35,7 +35,7 @@ use sip::{Sip, SipEnv};
 use alloc::string::String;
 use alloc::format;
 use sip::ipc::{self, Sender, Receiver};
-use sip::ash::{AshContext, Instruction, Reg, AshJit};
+use sip::ash::{AshContext, CheriCap, Perms, Instruction, Reg, AshJit};
 
 // ★ 仮想メモリマッパー(VMM)をグローバルに公開し、W^X防壁を操作可能にする
 use spin::Mutex;
@@ -238,13 +238,20 @@ pub extern "C" fn _start() -> ! {
             println!("\n[ ASH ] Booting Ring 0 Sandbox VM (Ultimate Secure Mode)...");
             serial_println!("[ ASH ] Booting Ring 0 Sandbox VM (Ultimate Secure Mode)...");
 
-            let mut ctx = AshContext { data: [0; 64], state: [0; 8] };
+            let mut data_buf = [0u8; 64];
+            let mut state_buf = [0u64; 8];
+            let mut ctx = unsafe {
+                AshContext {
+                    memory: CheriCap::new_root(data_buf.as_mut_ptr(), 64, Perms::RW),
+                    state: CheriCap::new_root(state_buf.as_mut_ptr(), 8, Perms::RW),
+                }
+            };
             // Mock IPv4 Packet
-            ctx.data[0] = 0x45; // Version 4, IHL 5
-            ctx.data[12] = 192; // Src IP: 192.168.1.1
-            ctx.data[13] = 168;
-            ctx.data[14] = 1;
-            ctx.data[15] = 1;
+            data_buf[0] = 0x45; // Version 4, IHL 5
+            data_buf[12] = 192; // Src IP: 192.168.1.1
+            data_buf[13] = 168;
+            data_buf[14] = 1;
+            data_buf[15] = 1;
             
             let bytecode = [
                 // 1. Get initial TSC Time (Helper 0)
@@ -297,10 +304,10 @@ pub extern "C" fn _start() -> ! {
 
             println!("        -> [ ASH JIT ] Native Result: {}", native_result);
             serial_println!("        -> [ ASH JIT ] Native Result: {}", native_result);
-            println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", ctx.state[1]);
-            serial_println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", ctx.state[1]);
-            println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", ctx.state[2]);
-            serial_println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", ctx.state[2]);
+            println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", state_buf[1]);
+            serial_println!("        -> [ ASH JIT ] Loop Calculation Sum (State[1]): {}", state_buf[1]);
+            println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", state_buf[2]);
+            serial_println!("        -> [ ASH JIT ] JIT Execution Time (TSC Ticks): {}", state_buf[2]);
 
             // ==========================================
             // ★ Phase 4: SIPと非同期エグゼキュータの起動 (True Preemption)

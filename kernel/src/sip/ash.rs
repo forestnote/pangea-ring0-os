@@ -43,9 +43,63 @@ pub extern "C" fn helper_debug_print(val: u64) -> u64 {
     0
 }
 
+// --- CHERI (Capability Hardware Enhanced RISC Instructions) Concept ---
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct Perms(pub u8);
+
+impl Perms {
+    pub const NONE: Perms  = Perms(0);
+    pub const READ: Perms  = Perms(1 << 0);
+    pub const WRITE: Perms = Perms(1 << 1);
+    pub const EXEC: Perms  = Perms(1 << 2);
+    pub const RW: Perms    = Perms(Self::READ.0 | Self::WRITE.0);
+
+    pub fn contains(&self, other: Perms) -> bool {
+        (self.0 & other.0) == other.0
+    }
+}
+
+/// A software-emulated CHERI-style capability.
+/// Carries an explicit memory boundary (mask) and permissions, 
+/// which the JIT uses to enforce bounds in hardware natively.
+#[repr(C)]
+pub struct CheriCap<T> {
+    pub base: *mut T,
+    pub mask: usize, // Must be (power of 2) - 1
+    pub perms: Perms,
+    _pad: [u8; 7],
+}
+
+impl<T> CheriCap<T> {
+    pub unsafe fn new_root(ptr: *mut T, len: usize, perms: Perms) -> Self {
+        assert!(len.is_power_of_two(), "CheriCap length must be a power of two for MBC");
+        Self {
+            base: ptr,
+            mask: len - 1,
+            perms,
+            _pad: [0; 7],
+        }
+    }
+
+    pub fn get(&self, index: usize) -> Option<&T> {
+        if !self.perms.contains(Perms::READ) || index > self.mask {
+            return None;
+        }
+        Some(unsafe { &*self.base.add(index) })
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+        if !self.perms.contains(Perms::WRITE) || index > self.mask {
+            return None;
+        }
+        Some(unsafe { &mut *self.base.add(index) })
+    }
+}
+
+#[repr(C)]
 pub struct AshContext {
-    pub data: [u8; 64],
-    pub state: [u64; 8],
+    pub memory: CheriCap<u8>, // Offset 0
+    pub state: CheriCap<u64>, // Offset 24
 }
 
 pub struct AshVm { registers: [u64; 6] }
@@ -84,49 +138,47 @@ impl AshVm {
                     }
                 }
                 Instruction::LoadContext(dst, offset) => {
-                    if offset < context.data.len() {
-                        self.registers[dst as usize] = context.data[offset] as u64;
-                    } else {
-                        self.registers[dst as usize] = 0;
-                    }
+                    self.registers[dst as usize] = *context.memory.get(offset).unwrap_or(&0) as u64;
                 }
                 Instruction::StoreContext(data, offset) => {
-                    if offset < context.data.len() {
-                        context.data[offset] = self.registers[data as usize] as u8;
+                    if let Some(byte) = context.memory.get_mut(offset) {
+                        *byte = self.registers[data as usize] as u8;
                     }
                 }
                 Instruction::LoadDyn(dst, src) => {
-                    let off = (self.registers[src as usize] & 0x3F) as usize;
-                    self.registers[dst as usize] = context.data[off] as u64;
+                    let off = (self.registers[src as usize] as usize) & context.memory.mask;
+                    self.registers[dst as usize] = *context.memory.get(off).unwrap_or(&0) as u64;
                 }
                 Instruction::StoreDyn(data, off_reg) => {
-                    let off = (self.registers[off_reg as usize] & 0x3F) as usize;
-                    context.data[off] = self.registers[data as usize] as u8;
-                }
-                Instruction::LoadState(dst, offset) => {
-                    if offset < 8 {
-                        self.registers[dst as usize] = context.state[offset as usize];
+                    let off = (self.registers[off_reg as usize] as usize) & context.memory.mask;
+                    if let Some(byte) = context.memory.get_mut(off) {
+                        *byte = self.registers[data as usize] as u8;
                     }
                 }
+                Instruction::LoadState(dst, offset) => {
+                    self.registers[dst as usize] = *context.state.get(offset as usize).unwrap_or(&0);
+                }
                 Instruction::StoreState(src, offset) => {
-                    if offset < 8 {
-                        context.state[offset as usize] = self.registers[src as usize];
+                    if let Some(val) = context.state.get_mut(offset as usize) {
+                        *val = self.registers[src as usize];
                     }
                 }
                 Instruction::LoadStateDyn(dst, off_reg) => {
-                    let off = (self.registers[off_reg as usize] & 0x07) as usize;
-                    self.registers[dst as usize] = context.state[off];
+                    let off = (self.registers[off_reg as usize] as usize) & context.state.mask;
+                    self.registers[dst as usize] = *context.state.get(off).unwrap_or(&0);
                 }
                 Instruction::StoreStateDyn(data, off_reg) => {
-                    let off = (self.registers[off_reg as usize] & 0x07) as usize;
-                    context.state[off] = self.registers[data as usize];
+                    let off = (self.registers[off_reg as usize] as usize) & context.state.mask;
+                    if let Some(val) = context.state.get_mut(off) {
+                        *val = self.registers[data as usize];
+                    }
                 }
                 Instruction::LoadNet32(dst, off_reg) => {
-                    let off = (self.registers[off_reg as usize] & 0x3C) as usize;
-                    let b0 = context.data[off] as u64;
-                    let b1 = context.data[off + 1] as u64;
-                    let b2 = context.data[off + 2] as u64;
-                    let b3 = context.data[off + 3] as u64;
+                    let off = (self.registers[off_reg as usize] as usize) & context.memory.mask & !3;
+                    let b0 = *context.memory.get(off).unwrap_or(&0) as u64;
+                    let b1 = *context.memory.get(off + 1).unwrap_or(&0) as u64;
+                    let b2 = *context.memory.get(off + 2).unwrap_or(&0) as u64;
+                    let b3 = *context.memory.get(off + 3).unwrap_or(&0) as u64;
                     self.registers[dst as usize] = (b0 << 24) | (b1 << 16) | (b2 << 8) | b3;
                 }
                 Instruction::LoopBwd(r, count) => {
@@ -276,92 +328,107 @@ impl AshJit {
                 }
                 Instruction::LoadContext(dst, offset) => {
                     let d = Self::reg_to_x86(dst);
-                    if offset < 64 {
-                        code.push(0x48); code.push(0x0f); code.push(0xb6); code.push(0x40 | (d << 3) | 0x07); code.push(offset as u8);
-                    } else {
-                        code.push(0x48); code.push(0xc7); code.push(0xc0 + d); code.extend_from_slice(&[0, 0, 0, 0]);
-                    }
+                    // r8 = offset
+                    code.push(0x49); code.push(0xc7); code.push(0xc0); code.extend_from_slice(&(offset as u32).to_le_bytes());
+                    // r11 = memory.mask (offset 8)
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = memory.base (offset 0)
+                    code.push(0x4c); code.push(0x8b); code.push(0x17);
+                    // movzx dst, byte ptr [r10 + r8]
+                    code.push(0x4b); code.push(0x0f); code.push(0xb6); code.push((d << 3) | 0x04); code.push(0x02);
                 }
                 Instruction::StoreContext(data_reg, offset) => {
-                    let d = Self::reg_to_x86(data_reg);
-                    if offset < 64 {
-                        // mov [rdi + disp8], reg8
-                        code.push(0x40); code.push(0x88); code.push(0x40 | (d << 3) | 0x07); code.push(offset as u8);
-                    }
+                    let s = Self::reg_to_x86(data_reg);
+                    // r8 = offset
+                    code.push(0x49); code.push(0xc7); code.push(0xc0); code.extend_from_slice(&(offset as u32).to_le_bytes());
+                    // r11 = memory.mask
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = memory.base
+                    code.push(0x4c); code.push(0x8b); code.push(0x17);
+                    // mov byte ptr [r10 + r8], src
+                    code.push(0x43); code.push(0x88); code.push((s << 3) | 0x04); code.push(0x02);
                 }
                 Instruction::LoadDyn(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
-                    // mov r8, src (Use r8 as scratch register to prevent mutating src)
-                    code.push(0x49); code.push(0x89); code.push(0xc0 | s);
-                    // and r8, 63 (Zero-cost branchless bounds check)
-                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x3F);
-                    // movzx dst, byte ptr [rdi + r8]
-                    code.push(0x4a); code.push(0x0f); code.push(0xb6);
-                    code.push(0x04 | (d << 3));
-                    code.push(0x07);
+                    // r8 = src
+                    code.push(0x4d); code.push(0x89); code.push(0xc0 | s);
+                    // r11 = memory.mask (offset 8)
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = memory.base (offset 0)
+                    code.push(0x4c); code.push(0x8b); code.push(0x17);
+                    // movzx dst, byte ptr [r10 + r8]
+                    code.push(0x4b); code.push(0x0f); code.push(0xb6); code.push((d << 3) | 0x04); code.push(0x02);
                 }
                 Instruction::StoreDyn(data_reg, off_reg) => {
                     let data = Self::reg_to_x86(data_reg); let off = Self::reg_to_x86(off_reg);
-                    // mov r8, off
-                    code.push(0x49); code.push(0x89); code.push(0xc0 | off);
-                    // and r8, 63
-                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x3F);
-                    // mov byte ptr [rdi + r8], data
-                    code.push(0x42); code.push(0x88);
-                    code.push(0x04 | (data << 3));
-                    code.push(0x07);
+                    // r8 = off
+                    code.push(0x4d); code.push(0x89); code.push(0xc0 | off);
+                    // r11 = memory.mask (offset 8)
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x08);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = memory.base (offset 0)
+                    code.push(0x4c); code.push(0x8b); code.push(0x17);
+                    // mov byte ptr [r10 + r8], data
+                    code.push(0x43); code.push(0x88); code.push((data << 3) | 0x04); code.push(0x02);
                 }
                 Instruction::LoadState(dst, offset) => {
                     let d = Self::reg_to_x86(dst);
-                    if offset < 8 {
-                        let disp = 64 + offset * 8;
-                        // mov r64, qword ptr [rdi + disp8]
-                        code.push(0x48); code.push(0x8b); code.push(0x40 | (d << 3) | 0x07); code.push(disp as u8);
-                    }
+                    // r8 = offset
+                    code.push(0x49); code.push(0xc7); code.push(0xc0); code.extend_from_slice(&(offset as u32).to_le_bytes());
+                    // r11 = state.mask (offset 32)
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = state.base (offset 24)
+                    code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
+                    // mov dst, qword ptr [r10 + r8 * 8]
+                    code.push(0x4b); code.push(0x8b); code.push((d << 3) | 0x04); code.push(0xc2);
                 }
                 Instruction::StoreState(src, offset) => {
                     let s = Self::reg_to_x86(src);
-                    if offset < 8 {
-                        let disp = 64 + offset * 8;
-                        // mov qword ptr [rdi + disp8], r64
-                        code.push(0x48); code.push(0x89); code.push(0x40 | (s << 3) | 0x07); code.push(disp as u8);
-                    }
+                    // r8 = offset
+                    code.push(0x49); code.push(0xc7); code.push(0xc0); code.extend_from_slice(&(offset as u32).to_le_bytes());
+                    // r11 = state.mask (offset 32)
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = state.base (offset 24)
+                    code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
+                    // mov qword ptr [r10 + r8 * 8], src
+                    code.push(0x4b); code.push(0x89); code.push((s << 3) | 0x04); code.push(0xc2);
                 }
 
                 Instruction::LoadStateDyn(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
-                    // Bounds Check: and src, 0x07 (max 8 states)
-                    // We must NOT mutate src. Use r8.
-                    code.push(0x4d); code.push(0x89); code.push(0xc0 | s); // mov r8, src
-                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07); // and r8, 7
-                    
-                    // State offset is rdi + 64.
-                    // We want: mov dst, [rdi + 64 + r8 * 8]
-                    // First, put (rdi + 64) into r10 (scratch). 
-                    // lea r10, [rdi + 64]
-                    code.push(0x4c); code.push(0x8d); code.push(0x57); code.push(0x40);
-                    
-                    // mov dst, [r10 + r8 * 8]
-                    // REX.W=1, R=0, X=1 (r8), B=1 (r10) -> 0x4B
-                    // Opcode: 0x8B
-                    // ModRM: mod=00, reg=d, rm=100 (SIB) -> (d << 3) | 0x04
-                    // SIB: scale=11 (*8), index=0 (r8), base=2 (r10) -> 0xC2
+                    // r8 = src
+                    code.push(0x4d); code.push(0x89); code.push(0xc0 | s);
+                    // r11 = state.mask (offset 32)
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = state.base (offset 24)
+                    code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
+                    // mov dst, qword ptr [r10 + r8 * 8]
                     code.push(0x4b); code.push(0x8b); code.push((d << 3) | 0x04); code.push(0xc2);
                 }
                 Instruction::StoreStateDyn(dst, src) => {
                     let d = Self::reg_to_x86(dst); let s = Self::reg_to_x86(src);
-                    // Bounds Check for dst
-                    code.push(0x4d); code.push(0x89); code.push(0xc0 | d); // mov r8, dst
-                    code.push(0x49); code.push(0x83); code.push(0xe0); code.push(0x07); // and r8, 7
-                    
-                    // lea r10, [rdi + 64]
-                    code.push(0x4c); code.push(0x8d); code.push(0x57); code.push(0x40);
-                    
-                    // mov [r10 + r8 * 8], src
-                    // REX.W=1, R=0, X=1 (r8), B=1 (r10) -> 0x4B
-                    // Opcode: 0x89
-                    // ModRM: mod=00, reg=s, rm=100 (SIB) -> (s << 3) | 0x04
-                    // SIB: scale=11 (*8), index=0 (r8), base=2 (r10) -> 0xC2
+                    // r8 = dst
+                    code.push(0x4d); code.push(0x89); code.push(0xc0 | d);
+                    // r11 = state.mask
+                    code.push(0x4c); code.push(0x8b); code.push(0x5f); code.push(0x20);
+                    // and r8, r11
+                    code.push(0x4d); code.push(0x21); code.push(0xd8);
+                    // r10 = state.base
+                    code.push(0x4c); code.push(0x8b); code.push(0x57); code.push(0x18);
+                    // mov qword ptr [r10 + r8 * 8], src
                     code.push(0x4b); code.push(0x89); code.push((s << 3) | 0x04); code.push(0xc2);
                 }
                 Instruction::LoadNet32(dst, off_reg) => {
