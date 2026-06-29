@@ -240,18 +240,20 @@ pub extern "C" fn _start() -> ! {
 
             let mut data_buf = [0u8; 64];
             let mut state_buf = [0u64; 8];
-            let mut ctx = unsafe {
-                AshContext {
-                    memory: CheriCap::new_root(data_buf.as_mut_ptr(), 64, Perms::RW),
-                    state: CheriCap::new_root(state_buf.as_mut_ptr(), 8, Perms::RW),
-                }
-            };
+
             // Mock IPv4 Packet
             data_buf[0] = 0x45; // Version 4, IHL 5
             data_buf[12] = 192; // Src IP: 192.168.1.1
             data_buf[13] = 168;
             data_buf[14] = 1;
             data_buf[15] = 1;
+
+            let mut ctx = unsafe {
+                AshContext {
+                    memory: CheriCap::new_root(data_buf.as_mut_ptr(), 64, Perms::RW),
+                    state: CheriCap::new_root(state_buf.as_mut_ptr(), 8, Perms::RW),
+                }
+            };
             
             let bytecode = [
                 // 1. Get initial TSC Time (Helper 0)
