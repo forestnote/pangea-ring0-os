@@ -201,8 +201,8 @@ pub extern "C" fn _start() -> ! {
 
             writer::init_writer(fb_ptr, width, height, pitch);
 
-            // ★ バージョンとブートシグネチャを v0.0.4-2 に更新
-            println!("PangeaOS v0.0.4-2: Object Bound Checking & SLS Security.");
+            // ★ バージョンとブートシグネチャを v0.0.4-3 に更新
+            println!("PangeaOS v0.0.4-3: SLS Capability Control (CHERI-like).");
 
             gdt::init();
             interrupts::init_idt();
@@ -247,7 +247,11 @@ pub extern "C" fn _start() -> ! {
                 println!("[ OK ] Global Heap Mapped. Allocator Ready.");
 
                 sls::initialize();
-                let demo_ptr = sls::create_object(sls::ObjectId(0x9999), 4096);
+                let oid = sls::ObjectId(0x9999);
+                let demo_ptr = sls::create_object(oid, 4096);
+                let cap_token = sls::generate_capability(oid);
+                
+                println!("[ SLS ] Object {:#x} Capability Token: {:#x}", oid.0, cap_token);
                 
                 let bsp_lapic_id = apic::lapic_id();
                 *CORE_VMMS[bsp_lapic_id as usize].lock() = Some(mapper);

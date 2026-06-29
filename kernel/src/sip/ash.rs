@@ -48,9 +48,15 @@ pub extern "C" fn helper_debug_print(val: u64) -> u64 {
     0
 }
 
-pub extern "C" fn helper_sls_map(oid: u64) -> u64 {
+pub extern "C" fn helper_sls_map(oid: u64, token: u64) -> u64 {
     // [ Intel IBT (Indirect Branch Tracking) ]
     unsafe { core::arch::asm!("endbr64") };
+    
+    if !crate::sls::verify_capability(crate::sls::ObjectId(oid), token) {
+        crate::serial_println!("[ SECURITY ] Invalid SLS Capability Token for OID {:#x}! Access Denied.", oid);
+        return 0;
+    }
+    
     crate::sls::get_object(crate::sls::ObjectId(oid)).unwrap_or(0)
 }
 
@@ -569,7 +575,7 @@ impl AshJit {
                         code.push(0x59); // pop rcx
                         code.push(0x5f); // pop rdi
                     } else if func_id == 2 {
-                        // helper_sls_map (Takes OID in R1, returns mapped address in R0)
+                        // helper_sls_map (Takes OID in R1, Token in R2, returns mapped address in R0)
                         code.push(0x57); // push rdi
                         code.push(0x51); // push rcx
                         code.push(0x52); // push rdx
@@ -577,6 +583,9 @@ impl AshJit {
                         code.push(0x41); code.push(0x51); // push r9
 
                         code.push(0x48); code.push(0x89); code.push(0xcf); // mov rdi, rcx (Pass R1 as first arg)
+                        
+                        let arg2 = Self::reg_to_x86(Reg::R2);
+                        code.push(0x48); code.push(0x89); code.push(0xc6 | (arg2 << 3)); // mov rsi, reg[R2] (Pass R2 as second arg)
 
                         let addr = helper_sls_map as *const () as usize;
                         code.push(0x49); code.push(0xbb); code.extend_from_slice(&addr.to_le_bytes()); // mov r11, addr
